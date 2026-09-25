@@ -208,6 +208,48 @@ async def get_patient_history(
             detail="Failed to retrieve medical history"
         )
 
+@router.delete("/medical-history/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_medical_session(
+    session_id: str,
+    email: str = Depends(get_current_user_email)
+):
+    """Delete one medical history session belonging to the logged-in patient."""
+    try:
+        db = await get_database()
+        patient = await db.patients.find_one({"email": email})
+        if not patient:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Patient not found"
+            )
+
+        try:
+            object_id = ObjectId(session_id)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Medical session not found"
+            )
+
+        result = await db.medical_history.delete_one({
+            "_id": object_id,
+            "patient_id": str(patient["_id"])
+        })
+        if result.deleted_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Medical session not found"
+            )
+        return None
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete medical session error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete medical session"
+        )
+
 @router.get("/medical-history/{session_id}", response_model=MedicalHistoryResponse)
 async def get_session_details(
     session_id: str,

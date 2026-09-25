@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from typing import List
+from typing import Dict, List
 import json
 from pathlib import Path
 from dataclasses import dataclass
@@ -10,6 +10,7 @@ router = APIRouter()
 class SymptomInput:
     symptoms: List[str]
     language: str = "en"
+    answers: Dict[str, str] = None
 
 @dataclass
 class DiagnosisResponse:
@@ -109,21 +110,32 @@ SYMPTOM_DISEASE_MAP = {
     "chest_pain": ["asthma", "gastroenteritis"],
 }
 
-def diagnose_from_symptoms(symptoms: List[str]) -> tuple:
-    """Simple rule-based diagnosis from symptoms"""
+def diagnose_from_symptoms(symptoms: List[str], answers: Dict[str, str] = None) -> tuple:
+    """Rule-based diagnosis with optional clarification-answer tie breakers."""
     disease_scores = {}
+    answers = answers or {}
 
     for symptom in symptoms:
         if symptom in SYMPTOM_DISEASE_MAP:
             for disease in SYMPTOM_DISEASE_MAP[symptom]:
                 disease_scores[disease] = disease_scores.get(disease, 0) + 1
 
+    # Clarification answers add transparent tie-breaking evidence.
+    if answers.get("breathing") == "yes":
+        disease_scores["asthma"] = disease_scores.get("asthma", 0) + 2
+    if answers.get("fever_level") == "high":
+        disease_scores["flu"] = disease_scores.get("flu", 0) + 1
+    if answers.get("onset") == "sudden":
+        disease_scores["flu"] = disease_scores.get("flu", 0) + 1
+    if answers.get("nasal") == "yes":
+        disease_scores["cold"] = disease_scores.get("cold", 0) + 1
+
     if not disease_scores:
         return "common_ailment", 0.5
 
-    # Get disease with highest score
+    # Stable tie-breaking follows insertion order after answer evidence is applied.
     best_disease = max(disease_scores, key=disease_scores.get)
-    confidence = min(disease_scores[best_disease] / len(symptoms), 1.0)
+    confidence = min(disease_scores[best_disease] / max(len(symptoms), 1), 1.0)
 
     return best_disease, confidence
 
@@ -133,7 +145,7 @@ async def diagnose(input_data: SymptomInput):
     if not input_data.symptoms:
         raise HTTPException(status_code=400, detail="No symptoms provided")
 
-    disease_id, confidence = diagnose_from_symptoms(input_data.symptoms)
+    disease_id, confidence = diagnose_from_symptoms(input_data.symptoms, input_data.answers)
 
     if disease_id not in DISEASE_DATA:
         raise HTTPException(status_code=404, detail="Could not diagnose disease")

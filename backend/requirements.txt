@@ -3,5 +3,10 @@ uvicorn==0.30.0
 python-multipart==0.0.6
 requests==2.32.0
 python-dotenv==1.0.0
+pydantic[email]>=2.0.0
+email-validator>=2.0.0
+passlib==1.7.4
+# passlib 1.7.4 is incompatible with bcrypt 5.x
+bcrypt==4.0.1
 openai-whisper>=20240930
 pydub==0.25.1

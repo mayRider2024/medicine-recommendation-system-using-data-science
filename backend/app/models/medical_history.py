@@ -27,9 +27,13 @@ class MedicineInfo(BaseModel):
     frequency: str
     duration_days: int
     instructions: Optional[str] = None
+    meal_instruction: Optional[str] = None
+    side_effects: List[str] = []
+    precautions: List[str] = []
 
 class PrescriptionInfo(BaseModel):
     prescription_id: str
+    pdf_generated_at: Optional[datetime] = None
     medicines: List[MedicineInfo]
     wellness_tips: List[str]
     date_generated: datetime

@@ -186,7 +186,16 @@ export const voiceService = {
     if (!transcript || typeof transcript !== 'string') return [];
 
     const foundSymptoms = new Set();
-    const normalizedTranscript = transcript.toLowerCase().trim();
+    let normalizedTranscript = transcript.toLowerCase().trim();
+
+    // Whisper can turn symptom words into phonetically similar words. Apply
+    // conservative corrections only to phrases that strongly indicate a symptom.
+    if (!strictMode) {
+      normalizedTranscript = normalizedTranscript
+        .replace(/\bcuff\b/g, 'cough')
+        .replace(/\bspaining\b/g, 'paining')
+        .replace(/\b(body|head|chest|back|stomach|throat)\s+(?:is\s+)?spinning\b/g, '$1 is paining');
+    }
 
     // Iterate through each symptom and its matching rules
     Object.entries(symptomMappings).forEach(([symptomKey, rules]) => {

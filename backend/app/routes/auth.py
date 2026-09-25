@@ -32,7 +32,8 @@ async def signup(patient_data: PatientCreate):
             )
 
         # Hash password and create patient
-        hashed_password = get_password_hash(patient_data.password)
+        password_truncated = patient_data.password[:72]
+        hashed_password = get_password_hash(password_truncated)
 
         patient_dict = patient_data.dict(exclude={"password"})
         patient_in_db = PatientInDB(
@@ -86,8 +87,8 @@ async def login(credentials: PatientLogin):
                 detail="Incorrect email or password"
             )
 
-        # Verify password
-        if not verify_password(credentials.password, patient["hashed_password"]):
+        # Verify password (truncate to 72 bytes for bcrypt)
+        if not verify_password(credentials.password[:72], patient["hashed_password"]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password"
