@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { diagnosisAPI, prescriptionsAPI } from '../api';
@@ -12,10 +12,13 @@ function Dashboard() {
   const language = i18n.language?.startsWith('hi') ? 'hi' : 'en';
   const { user, logout, api } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [symptoms, setSymptoms] = useState([]);
   const [diagnosis, setDiagnosis] = useState(null);
   const [prescription, setPrescription] = useState(null);
+  const [activeHistoryId, setActiveHistoryId] = useState(null);
+  const [refreshingPrescription, setRefreshingPrescription] = useState(false);
 
   const [step, setStep] = useState('symptoms');
   const [loading, setLoading] = useState(false);
@@ -123,8 +126,60 @@ function Dashboard() {
     }
   };
 
-  const switchLanguage = (nextLanguage) => {
-    i18n.changeLanguage(nextLanguage);
+  const switchLanguage = async (nextLanguage) => {
+    await i18n.changeLanguage(nextLanguage);
+    if (!prescription || !diagnosis || nextLanguage === language || refreshingPrescription) return;
+
+    setRefreshingPrescription(true);
+    try {
+      const medicineIds = medicinesByDisease[diagnosis.disease_id] || ['paracetamol'];
+      const diseaseNames = {
+        flu: ['इन्फ्लूएंजा (फ्लू)', 'Influenza (Flu)'],
+        cold: ['सामान्य सर्दी', 'Common Cold'],
+        fever: ['बुखार', 'Fever'],
+        cough: ['खांसी', 'Cough'],
+        headache: ['सिरदर्द', 'Headache'],
+        allergy: ['एलर्जी', 'Allergy'],
+        asthma: ['अस्थमा', 'Asthma'],
+        gastroenteritis: ['आंत्रशोथ', 'Gastroenteritis'],
+      };
+      const diseaseName = diseaseNames[diagnosis.disease_id] || [diagnosis.disease_name, diagnosis.disease_name];
+      const nameForRequest = nextLanguage === 'hi'
+        ? `${diseaseName[0]} / ${diseaseName[1]}`
+        : diseaseName[1];
+      const response = await prescriptionsAPI.generatePrescription(
+        diagnosis.disease_id,
+        nameForRequest,
+        medicineIds,
+        nextLanguage
+      );
+      const refreshedPrescription = {
+        ...response.data,
+        prescription_id: prescription.prescription_id,
+        pdf_generated_at: prescription.pdf_generated_at,
+      };
+      setPrescription(refreshedPrescription);
+
+      const sessionsResponse = await api.get('/medical-history');
+      const sessions = sessionsResponse.data || [];
+      const currentSession = sessions.find(session =>
+        (session.id || session._id) === activeHistoryId
+      ) || sessions.find(session =>
+        JSON.stringify(session.symptoms || []) === JSON.stringify(symptoms)
+      ) || sessions[0];
+      const historyId = activeHistoryId || currentSession?.id || currentSession?._id;
+      if (historyId) {
+        setActiveHistoryId(historyId);
+        await api.put(`/medical-history/${historyId}/prescription`, {
+          prescription: refreshedPrescription,
+        });
+        loadHistory();
+      }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not refresh prescription language');
+    } finally {
+      setRefreshingPrescription(false);
+    }
   };
 
   const handleVoiceToggle = async () => {
@@ -165,6 +220,17 @@ function Dashboard() {
   }, []);
 
   useEffect(() => {
+    const session = location.state;
+    if (!session?.openPrescription) return;
+    setSymptoms(session.symptoms || []);
+    setDiagnosis(session.diagnosis || null);
+    setPrescription(session.prescription || null);
+    setActiveHistoryId(session.id || session._id || null);
+    setStep(session.prescription ? 'prescription' : session.diagnosis ? 'diagnosis' : 'symptoms');
+    navigate('/dashboard', { replace: true, state: null });
+  }, [location.state]);
+
+  useEffect(() => {
     localStorage.setItem('medicineAnalyticsSession', JSON.stringify({ symptoms, diagnosis, prescription }));
   }, [symptoms, diagnosis, prescription]);
 
@@ -193,6 +259,7 @@ function Dashboard() {
         });
         const historyId = historyRes.data?.id || historyRes.data?._id;
         if (historyId) {
+          setActiveHistoryId(historyId);
           await api.put(`/medical-history/${historyId}/diagnosis`, {
             diagnosis: res.data
           });
@@ -228,8 +295,9 @@ function Dashboard() {
         const histRes = await api.get('/medical-history');
         const sessions = histRes.data;
         if (sessions.length > 0) {
-          const latest = sessions[0];
-          const latestId = latest.id || latest._id;
+          const latest = sessions.find(session => (session.id || session._id) === activeHistoryId) || sessions[0];
+          const latestId = activeHistoryId || latest.id || latest._id;
+          setActiveHistoryId(latestId);
           await api.put(`/medical-history/${latestId}/prescription`, {
             prescription: res.data
           });
@@ -278,6 +346,8 @@ function Dashboard() {
     handleClearSymptoms();
     setDiagnosis(null);
     setPrescription(null);
+    setActiveHistoryId(null);
+    navigate('/dashboard', { replace: true, state: null });
     setStep('symptoms');
     setError('');
   };
@@ -486,6 +556,17 @@ function Dashboard() {
                 <span className="label">{t('description')}</span>
                 <p className="description">{diagnosis.recommendations}</p>
               </div>
+              {diagnosis.possible_diseases?.length > 1 && (
+                <div className="possible-diagnoses">
+                  <strong>{language === 'hi' ? 'अन्य संभावित स्थितियां / Other possible conditions' : 'Other possible conditions'}</strong>
+                  {diagnosis.possible_diseases.map(candidate => (
+                    <div className="possible-diagnosis-row" key={candidate.disease_id}>
+                      <span>{candidate.disease_name}</span>
+                      <span>{candidate.score} {language === 'hi' ? 'स्कोर / score' : 'score'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <button
               onClick={handleGeneratePrescription}
@@ -501,7 +582,7 @@ function Dashboard() {
         {/* ========== PRESCRIPTION STEP ========== */}
         {step === 'prescription' && prescription && (
           <div className="dashboard-card">
-            <h2>{t('prescription')}</h2>
+            <h2>{refreshingPrescription ? (language === 'hi' ? 'नुस्खे का अनुवाद हो रहा है…' : 'Updating prescription language…') : t('prescription')}</h2>
             <div className="prescription-note">
               <div className="note-heading">
                 <div className="note-brand">
@@ -545,7 +626,7 @@ function Dashboard() {
                 <div key={idx} className="tip-card">{tip}</div>
               ))}
             </div>
-            <button onClick={handlePrintPrescription} className="print-btn">🖨️ Print / Save as PDF</button>
+            <button onClick={handlePrintPrescription} className="print-btn" disabled={refreshingPrescription}>🖨️ Print / Save as PDF / प्रिंट करें या PDF सेव करें</button>
             {prescription.pdf_generated_at && <p className="pdf-status">PDF note recorded in patient history at {formatTime(prescription.pdf_generated_at)}</p>}
             <button onClick={handleReset} className="primary-btn reset-btn">{t('reset') || 'Start Over'}</button>
           </div>

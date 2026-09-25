@@ -411,6 +411,11 @@
   color: #1f2937;
 }
 
+.possible-diagnoses { padding: 1rem; background: #f0fbf3; border: 1px solid #c6e8cf; border-radius: .65rem; }
+.possible-diagnoses > strong { display: block; margin-bottom: .65rem; color: #176b3b; }
+.possible-diagnosis-row { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border-top: 1px solid #d9eddf; font-size: .88rem; }
+.possible-diagnosis-row:first-of-type { font-weight: 700; }
+
 .disease-name {
   color: #1e40af !important;
 }

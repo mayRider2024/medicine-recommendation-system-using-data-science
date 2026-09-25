@@ -14,11 +14,21 @@ class MedicalHistoryCreate(BaseModel):
     patient_inputs: List[PatientInput]  # All voice and text inputs
     language: str = "en"
 
+class PossibleDiseaseInfo(BaseModel):
+    disease_id: str
+    disease_name: str
+    score: int
+    confidence: float
+    severity: str
+    recommendations: str
+
 class DiagnosisInfo(BaseModel):
     disease_id: str
     disease_name: str
     confidence: float
     recommendations: str
+    severity: Optional[str] = None
+    possible_diseases: List[PossibleDiseaseInfo] = Field(default_factory=list)
 
 class MedicineInfo(BaseModel):
     medicine_name: str

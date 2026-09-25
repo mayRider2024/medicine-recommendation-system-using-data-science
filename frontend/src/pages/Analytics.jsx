@@ -5,18 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import cureLogo from '../components/logo/CureAI logo.png';
 import './Analytics.css';
 
-const symptomDiseaseMap = {
-  fever: ['fever', 'flu', 'cold', 'gastroenteritis'],
-  cough: ['cough', 'cold', 'flu', 'asthma', 'bronchitis'],
-  sore_throat: ['cold', 'flu'],
-  body_ache: ['flu', 'fever'],
-  runny_nose: ['cold', 'allergy'],
-  headache: ['headache', 'fever', 'flu', 'hypertension'],
-  fatigue: ['flu', 'fever', 'asthma'],
-  sneezing: ['cold', 'allergy'],
-  shortness_of_breath: ['asthma', 'bronchitis'],
-  chest_pain: ['asthma', 'gastroenteritis'],
-};
 
 const diseaseNamesHi = {
   fever: 'बुखार', flu: 'इन्फ्लूएंजा (फ्लू)', cold: 'सामान्य सर्दी', gastroenteritis: 'आंत्रशोथ',
@@ -48,24 +36,43 @@ const symptomNames = {
 const benchmarkCases = [
   { symptoms: ['fever'], expected: 'fever' },
   { symptoms: ['cough'], expected: 'cough' },
-  { symptoms: ['fever', 'body_ache'], expected: 'fever' },
+  { symptoms: ['fever', 'body_ache'], expected: 'flu' },
   { symptoms: ['cough', 'sore_throat'], expected: 'cold' },
   { symptoms: ['runny_nose', 'sneezing'], expected: 'cold' },
   { symptoms: ['headache'], expected: 'headache' },
   { symptoms: ['fatigue', 'shortness_of_breath'], expected: 'asthma' },
-  { symptoms: ['fever', 'cough', 'sore_throat'], expected: 'flu' },
+  { symptoms: ['fever', 'cough', 'sore_throat'], expected: 'cold' },
   { symptoms: ['chest_pain', 'shortness_of_breath'], expected: 'asthma' },
   { symptoms: ['runny_nose', 'sneezing', 'headache'], expected: 'cold' },
 ];
 
-function predictFromRules(symptoms) {
+function rankRules(symptoms, answers = {}) {
+  const symptomSet = new Set(symptoms);
   const scores = {};
-  symptoms.forEach(symptom => {
-    (symptomDiseaseMap[symptom] || []).forEach(disease => {
-      scores[disease] = (scores[disease] || 0) + 1;
-    });
-  });
-  return Object.entries(scores).sort((a, b) => b[1] - a[1])[0]?.[0] || 'common_ailment';
+  const respiratory = ['cough', 'sore_throat', 'runny_nose', 'sneezing'].filter(symptom => symptomSet.has(symptom));
+  const fluSupport = ['fever', 'body_ache', 'fatigue', 'cough', 'sore_throat'].filter(symptom => symptomSet.has(symptom));
+  const giSupport = ['nausea', 'diarrhea', 'abdominal_pain'].filter(symptom => symptomSet.has(symptom));
+
+  if (symptomSet.has('fever')) scores.fever = 1;
+  if (respiratory.length >= 2 || (symptomSet.has('fever') && respiratory.length && answers.nasal === 'yes')) {
+    scores.cold = respiratory.length + Number(symptomSet.has('fever')) + Number(answers.nasal === 'yes') + Number(symptomSet.has('runny_nose') && symptomSet.has('sneezing'));
+  }
+  if (symptomSet.has('fever') && (symptomSet.has('body_ache') || symptomSet.has('fatigue')) && fluSupport.length >= 2) {
+    scores.flu = fluSupport.length + Number(answers.fever_level === 'high') + Number(answers.onset === 'sudden');
+  }
+  if (symptomSet.has('cough')) scores.cough = 1;
+  if (symptomSet.has('runny_nose') && symptomSet.has('sneezing')) scores.allergy = 2;
+  if (symptomSet.has('shortness_of_breath')) scores.asthma = 1 + Number(symptomSet.has('chest_pain')) + Number(answers.breathing === 'yes');
+  if (giSupport.length >= 2) scores.gastroenteritis = giSupport.length + Number(symptomSet.has('fever'));
+  if (symptomSet.has('headache')) scores.headache = 1;
+
+  if (!Object.keys(scores).length) scores.common_ailment = 1;
+  return Object.entries(scores).map(([id, score]) => ({ id, score }))
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+}
+
+function predictFromRules(symptoms) {
+  return rankRules(symptoms)[0]?.id || 'common_ailment';
 }
 
 function calculateBenchmarkMetrics() {
@@ -118,29 +125,30 @@ function Analytics() {
   const prescription = session.prescription || null;
 
   const analysis = useMemo(() => {
-    const scores = {};
-    symptoms.forEach(symptom => {
-      (symptomDiseaseMap[symptom] || []).forEach(disease => {
-        scores[disease] = (scores[disease] || 0) + 1;
-      });
-    });
-    const candidates = Object.entries(scores)
-      .map(([id, score]) => ({
-        id,
-        score,
-        percentage: symptoms.length ? Math.round((score / symptoms.length) * 100) : 0,
-      }))
-      .sort((a, b) => b.score - a.score);
-    return { scores, candidates };
-  }, [symptoms]);
+    if (diagnosis?.possible_diseases?.length) {
+      const candidates = diagnosis.possible_diseases.map(candidate => ({
+        id: candidate.disease_id,
+        score: candidate.score,
+        percentage: Math.round((candidate.confidence || 0) * 100),
+      }));
+      return { scores: Object.fromEntries(candidates.map(candidate => [candidate.id, candidate.score])), candidates };
+    }
 
-  const selectedId = diagnosis?.disease_id || analysis.candidates[0]?.id;
+    const candidates = rankRules(symptoms).map(candidate => ({
+      ...candidate,
+      percentage: symptoms.length ? Math.min(Math.round((candidate.score / symptoms.length) * 100), 100) : 0,
+    }));
+    return { scores, candidates };
+  }, [symptoms, diagnosis]);
+
+  const hasQualifiedCandidates = Boolean(diagnosis?.possible_diseases?.length);
+  const selectedId = hasQualifiedCandidates ? diagnosis.disease_id : (analysis.candidates[0]?.id || diagnosis?.disease_id);
   const selectedCandidate = analysis.candidates.find(candidate => candidate.id === selectedId);
-  const displayDiagnosis = diagnosis || (selectedCandidate ? {
+  const displayDiagnosis = hasQualifiedCandidates ? diagnosis : (selectedCandidate ? {
     disease_id: selectedCandidate.id,
     disease_name: diseaseLabel(selectedCandidate.id),
     confidence: selectedCandidate.percentage / 100,
-  } : null);
+  } : diagnosis);
 
   const handleLogout = () => {
     logout();
@@ -239,6 +247,23 @@ function Analytics() {
             <div><b>{bilingual('Prescription', 'नुस्खा')}</b><span>{prescription ? `${prescription.medicines?.length || 0} ${bilingual('medicine(s) generated', 'दवाएं तैयार')}` : bilingual('Generate prescription from dashboard', 'डैशबोर्ड से नुस्खा बनाएं')}</span></div>
           </div>
           <p className="safety-note">⚕️ {bilingual('This is an educational prototype. Recommendations must be reviewed by a qualified medical professional.', 'यह एक शैक्षिक प्रोटोटाइप है। सिफारिशों की समीक्षा योग्य डॉक्टर से कराएं।')}</p>
+          {prescription && (
+            <button
+              className="open-prescription-btn"
+              onClick={() => navigate('/dashboard', {
+                state: {
+                  ...session,
+                  symptoms,
+                  diagnosis: displayDiagnosis,
+                  prescription,
+                  openPrescription: true,
+                },
+              })}
+            >
+              {bilingual('Open Prescription / PDF', 'नुस्खा / PDF खोलें')}
+              <span aria-hidden="true"> →</span>
+            </button>
+          )}
         </section>
 
         <section className="analytics-card metrics-card">

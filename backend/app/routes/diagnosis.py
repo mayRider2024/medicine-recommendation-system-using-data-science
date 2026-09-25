@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, List
 import json
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 router = APIRouter()
 
@@ -10,7 +10,16 @@ router = APIRouter()
 class SymptomInput:
     symptoms: List[str]
     language: str = "en"
-    answers: Dict[str, str] = None
+    answers: Dict[str, str] = field(default_factory=dict)
+
+@dataclass
+class PossibleDisease:
+    disease_id: str
+    disease_name: str
+    score: int
+    confidence: float
+    severity: str
+    recommendations: str
 
 @dataclass
 class DiagnosisResponse:
@@ -19,6 +28,7 @@ class DiagnosisResponse:
     confidence: float
     severity: str
     recommendations: str
+    possible_diseases: List[PossibleDisease] = field(default_factory=list)
 
 # Load symptoms mapping
 SYMPTOMS_PATH = Path(__file__).parent.parent / "data" / "symptoms.json"
@@ -45,6 +55,12 @@ DISEASE_DATA = {
         "name_hi": "बुखार",
         "severity": "moderate",
         "description": "Elevated body temperature (above 98.6°F). Often sign of infection."
+    },
+    "common_ailment": {
+        "name_en": "Unclassified symptoms",
+        "name_hi": "अवर्गीकृत लक्षण",
+        "severity": "unknown",
+        "description": "The reported symptoms do not match a supported pattern. Seek professional assessment."
     },
     "headache": {
         "name_en": "Headache/Migraine",
@@ -96,47 +112,64 @@ DISEASE_DATA = {
     }
 }
 
-# Symptom to disease mapping
-SYMPTOM_DISEASE_MAP = {
-    "fever": ["fever", "flu", "cold", "gastroenteritis"],
-    "cough": ["cough", "cold", "flu", "asthma", "bronchitis"],
-    "sore_throat": ["cold", "flu"],
-    "body_ache": ["flu", "fever"],
-    "runny_nose": ["cold", "allergy"],
-    "headache": ["headache", "fever", "flu", "hypertension"],
-    "fatigue": ["flu", "fever", "asthma"],
-    "sneezing": ["cold", "allergy"],
-    "shortness_of_breath": ["asthma", "bronchitis"],
-    "chest_pain": ["asthma", "gastroenteritis"],
-}
+RESPIRATORY_SYMPTOMS = {"cough", "sore_throat", "runny_nose", "sneezing"}
+FLU_SUPPORTING_SYMPTOMS = {"fever", "body_ache", "fatigue", "cough", "sore_throat"}
+GASTRO_SYMPTOMS = {"nausea", "diarrhea", "abdominal_pain"}
+
+
+def rank_diseases(symptoms: List[str], answers: Dict[str, str] = None) -> List[tuple]:
+    """Return only diseases whose minimum supporting symptom patterns are present.
+
+    This is an explainable demo ruleset, not a trained or clinically validated model.
+    Clarification answers can refine a supported pattern, but cannot create one alone.
+    """
+    symptom_set = set(symptoms)
+    answers = answers or {}
+    scores = {}
+
+    if "fever" in symptom_set:
+        scores["fever"] = 1
+
+    respiratory = symptom_set & RESPIRATORY_SYMPTOMS
+    if len(respiratory) >= 2 or ("fever" in symptom_set and respiratory and answers.get("nasal") == "yes"):
+        scores["cold"] = (
+            len(respiratory)
+            + int("fever" in symptom_set)
+            + int(answers.get("nasal") == "yes")
+            + int({"runny_nose", "sneezing"}.issubset(symptom_set))
+        )
+
+    flu_support = symptom_set & FLU_SUPPORTING_SYMPTOMS
+    if "fever" in symptom_set and ("body_ache" in symptom_set or "fatigue" in symptom_set) and len(flu_support) >= 2:
+        scores["flu"] = len(flu_support) + int(answers.get("fever_level") == "high") + int(answers.get("onset") == "sudden")
+
+    if "cough" in symptom_set:
+        scores["cough"] = 1
+
+    if len(symptom_set & {"runny_nose", "sneezing"}) >= 2:
+        scores["allergy"] = len(symptom_set & {"runny_nose", "sneezing"})
+
+    if "shortness_of_breath" in symptom_set:
+        scores["asthma"] = 1 + int("chest_pain" in symptom_set) + int(answers.get("breathing") == "yes")
+
+    gi_support = symptom_set & GASTRO_SYMPTOMS
+    if len(gi_support) >= 2:
+        scores["gastroenteritis"] = len(gi_support) + int("fever" in symptom_set)
+
+    if "headache" in symptom_set:
+        scores["headache"] = 1
+
+    if not scores:
+        return [("common_ailment", 1)]
+
+    return sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+
 
 def diagnose_from_symptoms(symptoms: List[str], answers: Dict[str, str] = None) -> tuple:
-    """Rule-based diagnosis with optional clarification-answer tie breakers."""
-    disease_scores = {}
-    answers = answers or {}
-
-    for symptom in symptoms:
-        if symptom in SYMPTOM_DISEASE_MAP:
-            for disease in SYMPTOM_DISEASE_MAP[symptom]:
-                disease_scores[disease] = disease_scores.get(disease, 0) + 1
-
-    # Clarification answers add transparent tie-breaking evidence.
-    if answers.get("breathing") == "yes":
-        disease_scores["asthma"] = disease_scores.get("asthma", 0) + 2
-    if answers.get("fever_level") == "high":
-        disease_scores["flu"] = disease_scores.get("flu", 0) + 1
-    if answers.get("onset") == "sudden":
-        disease_scores["flu"] = disease_scores.get("flu", 0) + 1
-    if answers.get("nasal") == "yes":
-        disease_scores["cold"] = disease_scores.get("cold", 0) + 1
-
-    if not disease_scores:
-        return "common_ailment", 0.5
-
-    # Stable tie-breaking follows insertion order after answer evidence is applied.
-    best_disease = max(disease_scores, key=disease_scores.get)
-    confidence = min(disease_scores[best_disease] / max(len(symptoms), 1), 1.0)
-
+    """Return the top qualified disease and a heuristic evidence ratio."""
+    ranked = rank_diseases(symptoms, answers)
+    best_disease, score = ranked[0]
+    confidence = min(score / max(len(symptoms), 1), 1.0)
     return best_disease, confidence
 
 @router.post("/diagnose", response_model=DiagnosisResponse)
@@ -145,21 +178,37 @@ async def diagnose(input_data: SymptomInput):
     if not input_data.symptoms:
         raise HTTPException(status_code=400, detail="No symptoms provided")
 
-    disease_id, confidence = diagnose_from_symptoms(input_data.symptoms, input_data.answers)
+    ranked_diseases = rank_diseases(input_data.symptoms, input_data.answers)
+    disease_id, top_score = ranked_diseases[0]
+    confidence = min(top_score / max(len(input_data.symptoms), 1), 1.0)
 
     if disease_id not in DISEASE_DATA:
         raise HTTPException(status_code=404, detail="Could not diagnose disease")
 
+    def disease_name_for(candidate_id: str) -> str:
+        disease = DISEASE_DATA[candidate_id]
+        return disease["name_hi"] if input_data.language == "hi" else disease["name_en"]
+
+    possible_diseases = []
+    for candidate_id, score in ranked_diseases:
+        candidate_info = DISEASE_DATA[candidate_id]
+        possible_diseases.append(PossibleDisease(
+            disease_id=candidate_id,
+            disease_name=disease_name_for(candidate_id),
+            score=score,
+            confidence=round(min(score / max(len(input_data.symptoms), 1), 1.0), 2),
+            severity=candidate_info["severity"],
+            recommendations=candidate_info["description"],
+        ))
+
     disease_info = DISEASE_DATA[disease_id]
-
-    disease_name = disease_info["name_hi"] if input_data.language == "hi" else disease_info["name_en"]
-
     return DiagnosisResponse(
         disease_id=disease_id,
-        disease_name=disease_name,
+        disease_name=disease_name_for(disease_id),
         confidence=round(confidence, 2),
         severity=disease_info["severity"],
-        recommendations=disease_info["description"]
+        recommendations=disease_info["description"],
+        possible_diseases=possible_diseases,
     )
 
 @router.get("/symptoms")
