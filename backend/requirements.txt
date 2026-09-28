@@ -10,3 +10,8 @@ passlib==1.7.4
 bcrypt==4.0.1
 openai-whisper>=20240930
 pydub==0.25.1
+
+scikit-learn>=1.5,<2.0
+joblib>=1.4,<2.0
+pandas>=2.2,<3.0
+numpy>=1.26,<3.0

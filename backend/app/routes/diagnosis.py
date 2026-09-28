@@ -1,227 +1,124 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, List
-import json
-from pathlib import Path
-from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
+
+from app.ml.model_service import predict_disease, get_feature_catalog, SYMPTOM_ALIASES
 
 router = APIRouter()
 
-@dataclass
-class SymptomInput:
-    symptoms: List[str]
+
+class SymptomInput(BaseModel):
+    symptoms: List[str] = Field(default_factory=list)
     language: str = "en"
-    answers: Dict[str, str] = field(default_factory=dict)
+    answers: Dict[str, str] = Field(default_factory=dict)
 
-@dataclass
-class PossibleDisease:
+
+class PossibleDisease(BaseModel):
     disease_id: str
     disease_name: str
-    score: int
+    score: float
     confidence: float
     severity: str
     recommendations: str
 
-@dataclass
-class DiagnosisResponse:
+
+class DiagnosisResponse(BaseModel):
     disease_id: str
     disease_name: str
     confidence: float
     severity: str
     recommendations: str
-    possible_diseases: List[PossibleDisease] = field(default_factory=list)
+    possible_diseases: List[PossibleDisease] = Field(default_factory=list)
+    model: str = "random_forest"
+    needs_clarification: bool = False
+    recognized_symptoms: List[str] = Field(default_factory=list)
+    unsupported_symptoms: List[str] = Field(default_factory=list)
 
-# Load symptoms mapping
-SYMPTOMS_PATH = Path(__file__).parent.parent / "data" / "symptoms.json"
 
-# Mock ML model for now - in production, load actual pre-trained model
-def load_symptom_classifier():
-    """Load pre-trained symptom classifier"""
-    # For MVP, return a mock classifier
-    # In production: pickle.load(open('models/symptom_classifier.pkl', 'rb'))
-    return None
+# The ML dataset has 41 disease labels. These are normalized here so the
+# existing frontend can continue receiving disease_id/disease_name fields.
+def normalize_id(name: str) -> str:
+    return name.strip().lower().replace(" ", "_").replace("-", "_")
 
-symptom_classifier = load_symptom_classifier()
 
-# Mock disease data
-DISEASE_DATA = {
-    "cold": {
-        "name_en": "Common Cold",
-        "name_hi": "सर्दी",
-        "severity": "mild",
-        "description": "Viral infection causing respiratory symptoms. Typically lasts 7-10 days."
-    },
-    "fever": {
-        "name_en": "Fever",
-        "name_hi": "बुखार",
-        "severity": "moderate",
-        "description": "Elevated body temperature (above 98.6°F). Often sign of infection."
-    },
-    "common_ailment": {
-        "name_en": "Unclassified symptoms",
-        "name_hi": "अवर्गीकृत लक्षण",
-        "severity": "unknown",
-        "description": "The reported symptoms do not match a supported pattern. Seek professional assessment."
-    },
-    "headache": {
-        "name_en": "Headache/Migraine",
-        "name_hi": "सिरदर्द",
-        "severity": "mild",
-        "description": "Pain in head or scalp. Can be tension, migraine, or cluster headache."
-    },
-    "flu": {
-        "name_en": "Influenza (Flu)",
-        "name_hi": "फ्लू",
-        "severity": "moderate",
-        "description": "Viral respiratory infection. More severe than common cold."
-    },
-    "cough": {
-        "name_en": "Bronchitis/Cough",
-        "name_hi": "खांसी",
-        "severity": "mild",
-        "description": "Respiratory reflex. Can be dry or productive."
-    },
-    "allergy": {
-        "name_en": "Allergic Reaction",
-        "name_hi": "एलर्जी",
-        "severity": "mild",
-        "description": "Immune response to allergens. Causes sneezing, runny nose, itching."
-    },
-    "gastroenteritis": {
-        "name_en": "Gastroenteritis",
-        "name_hi": "पेट की समस्या",
-        "severity": "moderate",
-        "description": "Stomach and intestinal inflammation. Causes nausea, vomiting, diarrhea."
-    },
-    "dysentery": {
-        "name_en": "Dysentery",
-        "name_hi": "पेचिश",
-        "severity": "moderate",
-        "description": "Intestinal infection causing severe diarrhea with blood."
-    },
-    "asthma": {
-        "name_en": "Asthma Attack",
-        "name_hi": "दमा",
-        "severity": "moderate",
-        "description": "Respiratory condition causing difficulty breathing and chest tightness."
-    },
-    "hypertension": {
-        "name_en": "High Blood Pressure",
-        "name_hi": "उच्च रक्तचाप",
-        "severity": "moderate",
-        "description": "Blood pressure consistently above 140/90 mmHg."
-    }
+LEGACY_DISEASE_IDS = {
+    "Common Cold": "cold",
+    "Bronchial Asthma": "asthma",
+    "Gastroenteritis": "gastroenteritis",
+    "Allergy": "allergy",
+    "Hypertension ": "hypertension",
+    "Migraine": "headache",
+    "Headache": "headache",
+    "Influenza (Flu)": "flu",
 }
 
-RESPIRATORY_SYMPTOMS = {"cough", "sore_throat", "runny_nose", "sneezing"}
-FLU_SUPPORTING_SYMPTOMS = {"fever", "body_ache", "fatigue", "cough", "sore_throat"}
-GASTRO_SYMPTOMS = {"nausea", "diarrhea", "abdominal_pain"}
 
+def disease_info(label: str) -> Dict[str, str]:
+    key = LEGACY_DISEASE_IDS.get(label, normalize_id(label))
+    # Generic metadata: detailed medicine selection remains a separate layer.
+    return {
+        "id": key,
+        "name": label.replace("_", " ").title(),
+        "severity": "unknown",
+        "description": "ML prediction from the CureAI symptom classifier. This prototype is not clinically validated.",
+    }
 
-def rank_diseases(symptoms: List[str], answers: Dict[str, str] = None) -> List[tuple]:
-    """Return only diseases whose minimum supporting symptom patterns are present.
-
-    This is an explainable demo ruleset, not a trained or clinically validated model.
-    Clarification answers can refine a supported pattern, but cannot create one alone.
-    """
-    symptom_set = set(symptoms)
-    answers = answers or {}
-    scores = {}
-
-    if "fever" in symptom_set:
-        scores["fever"] = 1
-
-    respiratory = symptom_set & RESPIRATORY_SYMPTOMS
-    if len(respiratory) >= 2 or ("fever" in symptom_set and respiratory and answers.get("nasal") == "yes"):
-        scores["cold"] = (
-            len(respiratory)
-            + int("fever" in symptom_set)
-            + int(answers.get("nasal") == "yes")
-            + int({"runny_nose", "sneezing"}.issubset(symptom_set))
-        )
-
-    flu_support = symptom_set & FLU_SUPPORTING_SYMPTOMS
-    if "fever" in symptom_set and ("body_ache" in symptom_set or "fatigue" in symptom_set) and len(flu_support) >= 2:
-        scores["flu"] = len(flu_support) + int(answers.get("fever_level") == "high") + int(answers.get("onset") == "sudden")
-
-    if "cough" in symptom_set:
-        scores["cough"] = 1
-
-    if len(symptom_set & {"runny_nose", "sneezing"}) >= 2:
-        scores["allergy"] = len(symptom_set & {"runny_nose", "sneezing"})
-
-    if "shortness_of_breath" in symptom_set:
-        scores["asthma"] = 1 + int("chest_pain" in symptom_set) + int(answers.get("breathing") == "yes")
-
-    gi_support = symptom_set & GASTRO_SYMPTOMS
-    if len(gi_support) >= 2:
-        scores["gastroenteritis"] = len(gi_support) + int("fever" in symptom_set)
-
-    if "headache" in symptom_set:
-        scores["headache"] = 1
-
-    if not scores:
-        return [("common_ailment", 1)]
-
-    return sorted(scores.items(), key=lambda item: (-item[1], item[0]))
-
-
-def diagnose_from_symptoms(symptoms: List[str], answers: Dict[str, str] = None) -> tuple:
-    """Return the top qualified disease and a heuristic evidence ratio."""
-    ranked = rank_diseases(symptoms, answers)
-    best_disease, score = ranked[0]
-    confidence = min(score / max(len(symptoms), 1), 1.0)
-    return best_disease, confidence
 
 @router.post("/diagnose", response_model=DiagnosisResponse)
 async def diagnose(input_data: SymptomInput):
-    """Diagnose disease from symptoms"""
     if not input_data.symptoms:
         raise HTTPException(status_code=400, detail="No symptoms provided")
 
-    ranked_diseases = rank_diseases(input_data.symptoms, input_data.answers)
-    disease_id, top_score = ranked_diseases[0]
-    confidence = min(top_score / max(len(input_data.symptoms), 1), 1.0)
+    result = predict_disease(input_data.symptoms, input_data.answers, top_k=3)
+    top_label = result["disease"]
+    top_info = disease_info(top_label)
 
-    if disease_id not in DISEASE_DATA:
-        raise HTTPException(status_code=404, detail="Could not diagnose disease")
-
-    def disease_name_for(candidate_id: str) -> str:
-        disease = DISEASE_DATA[candidate_id]
-        return disease["name_hi"] if input_data.language == "hi" else disease["name_en"]
-
-    possible_diseases = []
-    for candidate_id, score in ranked_diseases:
-        candidate_info = DISEASE_DATA[candidate_id]
-        possible_diseases.append(PossibleDisease(
-            disease_id=candidate_id,
-            disease_name=disease_name_for(candidate_id),
-            score=score,
-            confidence=round(min(score / max(len(input_data.symptoms), 1), 1.0), 2),
-            severity=candidate_info["severity"],
-            recommendations=candidate_info["description"],
+    possible = []
+    for item in result["top_predictions"]:
+        info = disease_info(item["disease"])
+        possible.append(PossibleDisease(
+            disease_id=info["id"],
+            disease_name=info["name"],
+            score=round(item["probability"], 4),
+            confidence=round(item["probability"], 4),
+            severity=info["severity"],
+            recommendations=info["description"],
         ))
 
-    disease_info = DISEASE_DATA[disease_id]
     return DiagnosisResponse(
-        disease_id=disease_id,
-        disease_name=disease_name_for(disease_id),
-        confidence=round(confidence, 2),
-        severity=disease_info["severity"],
-        recommendations=disease_info["description"],
-        possible_diseases=possible_diseases,
+        disease_id=top_info["id"],
+        disease_name=top_info["name"],
+        confidence=round(result["probability"], 4),
+        severity=top_info["severity"],
+        recommendations=top_info["description"],
+        possible_diseases=possible,
+        model="random_forest",
+        needs_clarification=result["needs_clarification"],
+        recognized_symptoms=result["recognized_symptoms"],
+        unsupported_symptoms=result["unsupported_symptoms"],
     )
+
 
 @router.get("/symptoms")
 async def get_symptoms(language: str = "en"):
-    """Get list of symptoms"""
-    symptoms = {
-        "en": [
-            "fever", "cough", "sore_throat", "body_ache", "runny_nose",
-            "headache", "fatigue", "sneezing", "shortness_of_breath", "chest_pain"
-        ],
-        "hi": [
-            "बुखार", "खांसी", "गले_में_खराश", "शरीर_में_दर्द", "नाक_बहना",
-            "सिरदर्द", "थकान", "छींक", "सांस_लेने_में_कठिनाई", "छाती_में_दर्द"
-        ]
+    """Return all 132 ML symptoms, plus the existing CureAI aliases."""
+    catalog = get_feature_catalog()
+    # Keep `symptoms` as a list of strings for compatibility with the
+    # existing React selector. The richer objects are exposed separately.
+    return {
+        "symptoms": [item["id"] for item in catalog],
+        "symptom_catalog": catalog,
+        "count": len(catalog),
+        "source": "cureai_132_symptom_model",
+        "aliases": SYMPTOM_ALIASES,
     }
-    return {"symptoms": symptoms.get(language, symptoms["en"])}
+
+
+@router.get("/model-info")
+async def model_info():
+    return {
+        "model": "Random Forest",
+        "feature_count": 132,
+        "message": "Disease prediction uses the trained 132-symptom classifier.",
+        "probability_note": "Returned probabilities are model probabilities, not clinically calibrated confidence.",
+    }
