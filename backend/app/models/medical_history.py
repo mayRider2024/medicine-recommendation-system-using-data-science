@@ -17,7 +17,7 @@ class MedicalHistoryCreate(BaseModel):
 class PossibleDiseaseInfo(BaseModel):
     disease_id: str
     disease_name: str
-    score: int
+    score: float
     confidence: float
     severity: str
     recommendations: str
@@ -29,6 +29,10 @@ class DiagnosisInfo(BaseModel):
     recommendations: str
     severity: Optional[str] = None
     possible_diseases: List[PossibleDiseaseInfo] = Field(default_factory=list)
+    model: Optional[str] = None
+    needs_clarification: bool = False
+    recognized_symptoms: List[str] = Field(default_factory=list)
+    unsupported_symptoms: List[str] = Field(default_factory=list)
 
 class MedicineInfo(BaseModel):
     medicine_name: str

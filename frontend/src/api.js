@@ -10,8 +10,8 @@ const api = axios.create({
 });
 
 export const diagnosisAPI = {
-  diagnose: (symptoms, language = 'en', answers = {}) =>
-    api.post('/diagnose', { symptoms, language, answers }),
+  diagnose: ({ symptoms, language = 'en', answers = {} }) =>
+    api.post('/diagnose', { symptoms, language, answers }, { timeout: 45000 }),
   getSymptoms: (language = 'en') =>
     api.get('/symptoms', { params: { language } }),
 };

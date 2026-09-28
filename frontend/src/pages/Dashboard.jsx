@@ -1,11 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
-import { diagnosisAPI, prescriptionsAPI } from '../api';
+import { diagnosisAPI, medicinesAPI, prescriptionsAPI } from '../api';
 import { voiceService } from '../voiceService';
 import cureLogo from '../components/logo/CureAI logo.png';
 import './Dashboard.css';
+
+const COMMON_SYMPTOMS = [
+  'fever', 'cough', 'sore_throat', 'body_ache', 'runny_nose', 'headache',
+  'fatigue', 'sneezing', 'nausea', 'dizziness', 'chills', 'chest_pain',
+  'shortness_of_breath', 'loss_of_taste', 'loss_of_smell', 'diarrhea',
+  'constipation', 'abdominal_pain', 'back_pain', 'joint_pain', 'rash',
+  'sweating', 'insomnia'
+];
 
 function Dashboard() {
   const { t, i18n } = useTranslation();
@@ -25,6 +33,15 @@ function Dashboard() {
   const [history, setHistory] = useState([]);
   const [error, setError] = useState('');
   const [symptomText, setSymptomText] = useState('');
+  const [symptomSearch, setSymptomSearch] = useState('');
+  const [symptomCatalog, setSymptomCatalog] = useState([]);
+  const [symptomAliases, setSymptomAliases] = useState({});
+  const [loadingSymptoms, setLoadingSymptoms] = useState(true);
+  const [catalogError, setCatalogError] = useState(false);
+  const [medicineRecommendations, setMedicineRecommendations] = useState([]);
+  const [loadingMedicines, setLoadingMedicines] = useState(false);
+  const [medicineCatalogUnavailable, setMedicineCatalogUnavailable] = useState(false);
+  const [medicineCatalogError, setMedicineCatalogError] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [clarificationAnswers, setClarificationAnswers] = useState({});
@@ -32,30 +49,69 @@ function Dashboard() {
   const recorderRef = useRef(null);
   const lastTypedSymptomsRef = useRef([]);
 
-  const commonSymptoms = [
-    'fever', 'cough', 'sore_throat', 'body_ache', 'runny_nose', 'headache',
-    'fatigue', 'sneezing', 'nausea', 'dizziness', 'chills', 'chest_pain',
-    'shortness_of_breath', 'loss_of_taste', 'loss_of_smell', 'diarrhea',
-    'constipation', 'abdominal_pain', 'back_pain', 'joint_pain', 'rash',
-    'sweating', 'insomnia'
-  ];
-
-  const medicinesByDisease = {
-    cold: ['paracetamol', 'cetirizine'],
-    fever: ['paracetamol'],
-    flu: ['oseltamivir', 'paracetamol'],
-    cough: ['cough_syrup'],
-    headache: ['paracetamol'],
-    allergy: ['cetirizine'],
-    asthma: ['cough_syrup'],
-  };
 
   const clarificationQuestions = [
-    { id: 'onset', labelKey: 'onset_question', options: [['sudden', 'onset_sudden'], ['gradual', 'onset_gradual']] },
     { id: 'fever_level', labelKey: 'fever_question', options: [['high', 'fever_high'], ['low', 'fever_low']] },
     { id: 'breathing', labelKey: 'breathing_question', options: [['yes', 'yes'], ['no', 'no']] },
     { id: 'nasal', labelKey: 'nasal_question', options: [['yes', 'yes'], ['no', 'no']] },
   ];
+
+  const symptomOptions = useMemo(() => {
+    const featureLabels = new Map(symptomCatalog.map(item => [item.id, item.label]));
+    const mappedFeatureIds = new Set(Object.values(symptomAliases).flat());
+    const options = new Map();
+
+    Object.entries(symptomAliases).forEach(([id, mappedIds]) => {
+      const translated = t(id);
+      const fallbackLabel = mappedIds.map(featureId => featureLabels.get(featureId) || featureId.replace(/_/g, ' ')).join(', ');
+      options.set(id, {
+        id,
+        label: translated !== id ? translated : (fallbackLabel || id.replace(/_/g, ' ')),
+        unsupported: mappedIds.length === 0 || !mappedIds.some(featureId => featureLabels.has(featureId)),
+      });
+    });
+
+    symptomCatalog.forEach(item => {
+      if (!mappedFeatureIds.has(item.id)) {
+        options.set(item.id, { id: item.id, label: item.label || item.id.replace(/_/g, ' '), unsupported: false });
+      }
+    });
+
+    COMMON_SYMPTOMS.forEach(id => {
+      if (!options.has(id)) {
+        const translated = t(id);
+        options.set(id, {
+          id,
+          label: translated !== id ? translated : id.replace(/_/g, ' '),
+          unsupported: symptomCatalog.length > 0 && !symptomCatalog.some(item => item.id === id),
+        });
+      }
+    });
+
+    return Array.from(options.values());
+  }, [symptomCatalog, symptomAliases, t]);
+
+  const symptomLabel = (id) => symptomOptions.find(item => item.id === id)?.label || t(id) || id.replace(/_/g, ' ');
+  const searchableSymptoms = symptomOptions.filter(item => {
+    const query = symptomSearch.trim().toLocaleLowerCase();
+    return query && !symptoms.includes(item.id) && `${item.id} ${item.label}`.toLocaleLowerCase().includes(query);
+  }).slice(0, 16);
+
+  const extractSymptomsFromText = (text, strictMode) => {
+    const detected = voiceService.extractSymptoms(text, strictMode);
+    if (!text || typeof text !== 'string') return detected;
+    const matchesPhrase = (phrase) => {
+      const escaped = phrase.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+      if (!escaped) return false;
+      return new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escaped}(?:$|[^\\p{L}\\p{N}_])`, 'iu').test(text);
+    };
+
+    symptomOptions.forEach(option => {
+      const terms = [option.id, option.id.replace(/_/g, ' '), option.label];
+      if (terms.some(term => matchesPhrase(term.toLocaleLowerCase()))) detected.push(option.id);
+    });
+    return Array.from(new Set(detected));
+  };
 
   const recordInputEvent = (event) => {
     const newEvent = {
@@ -69,6 +125,10 @@ function Dashboard() {
   const toggleSymptom = (symptom) => {
     const selected = !symptoms.includes(symptom);
     setSymptoms(current => selected ? [...current, symptom] : current.filter(x => x !== symptom));
+    setDiagnosis(null);
+    setPrescription(null);
+    setMedicineRecommendations([]);
+    setClarificationAnswers({});
     recordInputEvent({
       type: selected ? 'selected' : 'removed',
       source: 'Option',
@@ -79,7 +139,7 @@ function Dashboard() {
 
   const addSymptomsFromText = (text, strictMode = true, source = 'Typed') => {
     setSymptomText(text);
-    const detectedSymptoms = voiceService.extractSymptoms(text, strictMode);
+    const detectedSymptoms = extractSymptomsFromText(text, strictMode);
     const previous = lastTypedSymptomsRef.current;
     const added = detectedSymptoms.filter(symptom => !previous.includes(symptom));
     const removed = previous.filter(symptom => !detectedSymptoms.includes(symptom));
@@ -102,6 +162,10 @@ function Dashboard() {
     }
     if (detectedSymptoms.length > 0) {
       setSymptoms(current => Array.from(new Set([...current, ...detectedSymptoms])));
+      setDiagnosis(null);
+      setPrescription(null);
+      setMedicineRecommendations([]);
+      setClarificationAnswers({});
     }
   };
 
@@ -116,8 +180,8 @@ function Dashboard() {
     try {
       const result = await voiceService.transcribeAudio(audioBlob, language);
       addSymptomsFromText(result.text || '', false, 'Voice');
-      if (!voiceService.extractSymptoms(result.text || '', false).length) {
-        setError('No supported symptoms were detected. Try saying symptoms such as fever, cough, or headache.');
+      if (!extractSymptomsFromText(result.text || '', false).length) {
+        setError(t('no_symptom_matches'));
       }
     } catch (err) {
       setError(err.message || 'Voice transcription failed');
@@ -132,24 +196,20 @@ function Dashboard() {
 
     setRefreshingPrescription(true);
     try {
-      const medicineIds = medicinesByDisease[diagnosis.disease_id] || ['paracetamol'];
-      const diseaseNames = {
-        flu: ['इन्फ्लूएंजा (फ्लू)', 'Influenza (Flu)'],
-        cold: ['सामान्य सर्दी', 'Common Cold'],
-        fever: ['बुखार', 'Fever'],
-        cough: ['खांसी', 'Cough'],
-        headache: ['सिरदर्द', 'Headache'],
-        allergy: ['एलर्जी', 'Allergy'],
-        asthma: ['अस्थमा', 'Asthma'],
-        gastroenteritis: ['आंत्रशोथ', 'Gastroenteritis'],
-      };
-      const diseaseName = diseaseNames[diagnosis.disease_id] || [diagnosis.disease_name, diagnosis.disease_name];
-      const nameForRequest = nextLanguage === 'hi'
-        ? `${diseaseName[0]} / ${diseaseName[1]}`
-        : diseaseName[1];
+      let catalogMedicines = medicineRecommendations;
+      if (catalogMedicines.length === 0) {
+        try {
+          const catalogResponse = await medicinesAPI.getMedicinesForDisease(diagnosis.disease_id, nextLanguage);
+          catalogMedicines = catalogResponse.data.medicines || [];
+          setMedicineRecommendations(catalogMedicines);
+        } catch {
+          catalogMedicines = [];
+        }
+      }
+      const medicineIds = catalogMedicines.map(medicine => medicine.id);
       const response = await prescriptionsAPI.generatePrescription(
         diagnosis.disease_id,
-        nameForRequest,
+        diagnosis.disease_name,
         medicineIds,
         nextLanguage
       );
@@ -216,6 +276,28 @@ function Dashboard() {
   };
 
   useEffect(() => {
+    let cancelled = false;
+    setLoadingSymptoms(true);
+    setCatalogError(false);
+    diagnosisAPI.getSymptoms(language)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const catalog = Array.isArray(data.symptom_catalog)
+          ? data.symptom_catalog
+          : (data.symptoms || []).map(id => ({ id, label: id.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase()) }));
+        setSymptomCatalog(catalog);
+        setSymptomAliases(data.aliases || {});
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingSymptoms(false);
+      });
+    return () => { cancelled = true; };
+  }, [language]);
+
+  useEffect(() => {
     loadHistory();
   }, []);
 
@@ -234,46 +316,81 @@ function Dashboard() {
     localStorage.setItem('medicineAnalyticsSession', JSON.stringify({ symptoms, diagnosis, prescription }));
   }, [symptoms, diagnosis, prescription]);
 
+  const getDiagnosisErrorMessage = (err) => {
+    if (err.code === 'ECONNABORTED') return t('request_timeout');
+    if (!err.response) return t('backend_unavailable');
+    if (err.response.status === 422) return t('validation_error');
+    return t('diagnosis_failed');
+  };
+
   const handleDiagnose = async () => {
-    if (symptoms.length === 0) return;
-    if (step === 'symptoms') {
-      setStep('questions');
+    if (symptoms.length === 0) {
+      setError(t('empty_symptoms'));
       return;
     }
+
+    const submittingClarification = step === 'questions';
     setLoading(true);
     setError('');
+    setMedicineCatalogError(false);
     try {
-      const res = await diagnosisAPI.diagnose(symptoms, language, clarificationAnswers);
-      setDiagnosis(res.data);
+      const response = await diagnosisAPI.diagnose({
+        symptoms,
+        language,
+        answers: clarificationAnswers,
+      });
+      const result = response.data;
+      setDiagnosis(result);
+      setPrescription(null);
 
-      // Create the history record and persist the final diagnosis for this session.
-      try {
-        const historyRes = await api.post('/medical-history', {
-          symptoms,
-          patient_inputs: [{
-            type: 'text',
-            text: `${symptoms.join(', ')} | Clarification answers: ${JSON.stringify(clarificationAnswers)}`,
-            timestamp: new Date().toISOString()
-          }],
-          language
-        });
-        const historyId = historyRes.data?.id || historyRes.data?._id;
-        if (historyId) {
-          setActiveHistoryId(historyId);
-          await api.put(`/medical-history/${historyId}/diagnosis`, {
-            diagnosis: res.data
-          });
-        }
-      } catch (e) {
-        console.warn('Failed to save diagnosis history', e);
+      if (result.needs_clarification && !submittingClarification) {
+        setStep('questions');
+        return;
       }
 
       setStep('diagnosis');
+      setLoadingMedicines(true);
+      try {
+        const medicineResponse = await medicinesAPI.getMedicinesForDisease(result.disease_id, language);
+        setMedicineRecommendations(medicineResponse.data.medicines || []);
+        setMedicineCatalogUnavailable(false);
+      } catch (medicineError) {
+        setMedicineRecommendations([]);
+        setMedicineCatalogUnavailable(medicineError.response?.status === 404);
+        setMedicineCatalogError(medicineError.response?.status !== 404);
+      } finally {
+        setLoadingMedicines(false);
+      }
+
+      // Persist the actual API response (including candidate probabilities and
+      // symptom recognition fields) only after the clarification submission.
+      try {
+        let historyId = activeHistoryId;
+        if (!historyId) {
+          const historyResponse = await api.post('/medical-history', {
+            symptoms,
+            patient_inputs: [{
+              type: 'text',
+              text: `${symptoms.join(', ')} | Clarification answers: ${JSON.stringify(clarificationAnswers)}`,
+              timestamp: new Date().toISOString(),
+            }],
+            language,
+          });
+          historyId = historyResponse.data?.id || historyResponse.data?._id;
+          if (historyId) setActiveHistoryId(historyId);
+        }
+        if (historyId) {
+          await api.put(`/medical-history/${historyId}/diagnosis`, { diagnosis: result });
+        }
+      } catch (historyError) {
+        console.warn('Failed to save diagnosis history', historyError);
+      }
       loadHistory();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Diagnosis failed');
+      setError(getDiagnosisErrorMessage(err));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleGeneratePrescription = async () => {
@@ -281,10 +398,11 @@ function Dashboard() {
     setLoading(true);
     setError('');
     try {
+      const medicineIds = medicineRecommendations.map(medicine => medicine.id);
       const res = await prescriptionsAPI.generatePrescription(
         diagnosis.disease_id,
         diagnosis.disease_name,
-        medicinesByDisease[diagnosis.disease_id] || ['paracetamol'],
+        medicineIds,
         language
       );
       setPrescription(res.data);
@@ -338,6 +456,12 @@ function Dashboard() {
     }
     setSymptoms([]);
     setSymptomText('');
+    setSymptomSearch('');
+    setDiagnosis(null);
+    setPrescription(null);
+    setMedicineRecommendations([]);
+    setMedicineCatalogUnavailable(false);
+    setMedicineCatalogError(false);
     setClarificationAnswers({});
     lastTypedSymptomsRef.current = [];
   };
@@ -411,8 +535,8 @@ function Dashboard() {
           </div>
           <div className="header-actions">
             <div className="language-switcher" aria-label="Language selector">
-              <button className={language === 'en' ? 'language-btn active' : 'language-btn'} onClick={() => switchLanguage('en')}>EN</button>
-              <button className={language === 'hi' ? 'language-btn active' : 'language-btn'} onClick={() => switchLanguage('hi')}>हिंदी</button>
+              <button className={language === 'en' ? 'language-btn active' : 'language-btn'} onClick={() => switchLanguage('en')} disabled={loading || refreshingPrescription || isRecording || isTranscribing}>EN</button>
+              <button className={language === 'hi' ? 'language-btn active' : 'language-btn'} onClick={() => switchLanguage('hi')} disabled={loading || refreshingPrescription || isRecording || isTranscribing}>हिंदी</button>
             </div>
             <span className="user-email">{user?.email}</span>
             <button onClick={() => navigate('/analytics')} className="analytics-link">📊 Analytics</button>
@@ -422,7 +546,7 @@ function Dashboard() {
       </header>
 
       <main className="dashboard-main">
-        {error && <div className="dashboard-error">{error}</div>}
+        {error && <div className="dashboard-error" role="alert">{error}</div>}
 
         {/* ========== SYMPTOMS STEP ========== */}
         {step === 'symptoms' && (
@@ -430,8 +554,8 @@ function Dashboard() {
             <h2>{t('select_symptoms')}</h2>
             <div className="symptom-count">
               {symptoms.length > 0 && (
-                <span>{t('symptoms_selected', { count: symptoms.length })}
-                  <button onClick={handleClearSymptoms} className="clear-btn">{t('clear')}</button>
+                  <span>{t('symptoms_selected', { count: symptoms.length })}
+                  <button onClick={handleClearSymptoms} className="clear-btn" disabled={loading}>{t('clear')}</button>
                 </span>
               )}
             </div>
@@ -444,13 +568,13 @@ function Dashboard() {
                   value={symptomText}
                   onChange={handleTextChange}
                   placeholder={language === 'hi' ? 'लक्षण लिखें, जैसे बुखार और खांसी' : 'Type symptoms, e.g. fever and cough'}
-                  disabled={isRecording || isTranscribing}
+                  disabled={isRecording || isTranscribing || loading}
                 />
                 <button
                   type="button"
                   onClick={handleVoiceToggle}
                   className={`voice-btn ${isRecording ? 'recording' : ''}`}
-                  disabled={isTranscribing}
+                  disabled={isTranscribing || loading}
                   aria-label={isRecording ? 'Stop recording / रिकॉर्डिंग रोकें' : 'Speak symptoms / लक्षण बोलें'}
                 >
                   {isTranscribing ? '⏳' : isRecording ? '⏹ Stop' : `🎙️ ${t('voice')}`}
@@ -480,23 +604,72 @@ function Dashboard() {
                 </div>
               )}
             </div>
+            {symptoms.length > 0 && (
+              <div className="selected-symptoms">
+                <strong>{t('selected_symptoms')}</strong>
+                <div className="selected-symptom-chips">
+                  {symptoms.map(symptom => (
+                    <button key={symptom} type="button" onClick={() => toggleSymptom(symptom)} className="selected-symptom-chip" disabled={loading}>
+                      {symptomLabel(symptom)} <span aria-hidden="true">×</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <section className="model-symptom-browser" aria-label={t('symptom_search')}>
+              <label htmlFor="model-symptom-search">{t('symptom_search')}</label>
+              <input
+                id="model-symptom-search"
+                type="search"
+                value={symptomSearch}
+                onChange={event => setSymptomSearch(event.target.value)}
+                placeholder={t('symptom_search_hint')}
+                disabled={loading}
+              />
+              {loadingSymptoms && <p className="input-hint">{t('symptom_catalog_loading')}</p>}
+              {catalogError && <p className="catalog-warning">{t('symptom_catalog_error')}</p>}
+              {!loadingSymptoms && !catalogError && !symptomSearch.trim() && (
+                <p className="input-hint">{t('symptom_search_prompt')} ({symptomCatalog.length})</p>
+              )}
+              {symptomSearch.trim() && (
+                searchableSymptoms.length > 0 ? (
+                  <div className="symptoms-grid symptom-search-results">
+                    {searchableSymptoms.map(option => (
+                      <button key={option.id} type="button" onClick={() => toggleSymptom(option.id)} className="symptom-btn" disabled={loading}>
+                        <span>{option.label}</span>
+                        {option.unsupported && <small className="unsupported-tag">{t('unsupported_label')}</small>}
+                      </button>
+                    ))}
+                  </div>
+                ) : <p className="input-hint">{t('no_symptom_matches')}</p>
+              )}
+            </section>
+
+            <h3 className="common-symptoms-heading">{t('common_symptoms')}</h3>
             <div className="symptoms-grid">
-              {commonSymptoms.map(symptom => (
-                <button
-                  key={symptom}
-                  onClick={() => toggleSymptom(symptom)}
-                  className={`symptom-btn ${symptoms.includes(symptom) ? 'active' : ''}`}
-                >
-                  {t(symptom) || symptom.replace(/_/g, ' ')}
-                </button>
-              ))}
+              {COMMON_SYMPTOMS.map(symptom => {
+                const option = symptomOptions.find(item => item.id === symptom);
+                return (
+                  <button
+                    key={symptom}
+                    onClick={() => toggleSymptom(symptom)}
+                    className={`symptom-btn ${symptoms.includes(symptom) ? 'active' : ''}`}
+                    type="button"
+                    disabled={loading}
+                  >
+                    <span>{symptomLabel(symptom)}</span>
+                    {option?.unsupported && <small className="unsupported-tag">{t('unsupported_label')}</small>}
+                  </button>
+                );
+              })}
             </div>
             <button
               onClick={handleDiagnose}
               disabled={symptoms.length === 0 || loading}
               className="primary-btn"
             >
-              {loading ? 'Diagnosing...' : t('diagnose')}
+              {loading ? t('submitting') : t('diagnose')}
             </button>
           </div>
         )}
@@ -509,6 +682,23 @@ function Dashboard() {
               <span className="question-count">{t('questions_answered', { answered: Object.keys(clarificationAnswers).length, total: clarificationQuestions.length })}</span>
             </div>
             <p className="question-intro">{t('clarification_intro')}</p>
+            {diagnosis?.unsupported_symptoms?.length > 0 && (
+              <div className="unsupported-warning" role="status">
+                <strong>{t('unsupported_symptoms_notice')}</strong>
+                <p>{diagnosis.unsupported_symptoms.map(symptomLabel).join(', ')}</p>
+              </div>
+            )}
+            {diagnosis?.possible_diseases?.length > 0 && (
+              <div className="possible-diagnoses clarification-preview">
+                <strong>{language === 'hi' ? 'प्रारंभिक मॉडल अनुमान / Initial model predictions' : 'Initial model predictions'}</strong>
+                {diagnosis.possible_diseases.map(candidate => (
+                  <div className="possible-diagnosis-row" key={candidate.disease_id}>
+                    <span>{candidate.disease_name}</span>
+                    <span>{(Number(candidate.score ?? candidate.confidence ?? 0) * 100).toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="question-list">
               {clarificationQuestions.map(question => (
                 <div className="question-item" key={question.id}>
@@ -520,16 +710,18 @@ function Dashboard() {
                         key={value}
                         className={clarificationAnswers[question.id] === value ? 'question-option active' : 'question-option'}
                         onClick={() => setClarificationAnswers(current => ({ ...current, [question.id]: value }))}
+                        disabled={loading}
                       >{t(label)}</button>
                     ))}
                   </div>
                 </div>
               ))}
             </div>
+            {diagnosis?.needs_clarification && <p className="clarification-notice">{t('needs_clarification_notice')}</p>}
             <button onClick={handleDiagnose} disabled={loading} className="primary-btn">
               {loading ? t('submitting') : t('analyze_final')}
             </button>
-            <button onClick={() => setStep('symptoms')} className="secondary-btn">← {t('back_symptoms')}</button>
+            <button onClick={() => setStep('symptoms')} className="secondary-btn" disabled={loading}>← {t('back_symptoms')}</button>
           </div>
         )}
 
@@ -547,33 +739,63 @@ function Dashboard() {
                 <div className="confidence-bar">
                   <div
                     className="confidence-fill"
-                    style={{ width: `${(diagnosis.confidence * 100).toFixed(1)}%` }}
+                    style={{ width: `${Math.max(0, Math.min(Number(diagnosis.confidence || 0) * 100, 100)).toFixed(1)}%` }}
                   />
-                  <span className="confidence-text">{(diagnosis.confidence * 100).toFixed(1)}%</span>
+                  <span className="confidence-text">{(Number(diagnosis.confidence || 0) * 100).toFixed(1)}%</span>
                 </div>
+                <small className="probability-note">{t('model_probability_note')}</small>
               </div>
               <div className="diagnosis-row">
                 <span className="label">{t('description')}</span>
                 <p className="description">{diagnosis.recommendations}</p>
               </div>
-              {diagnosis.possible_diseases?.length > 1 && (
-                <div className="possible-diagnoses">
-                  <strong>{language === 'hi' ? 'अन्य संभावित स्थितियां / Other possible conditions' : 'Other possible conditions'}</strong>
-                  {diagnosis.possible_diseases.map(candidate => (
-                    <div className="possible-diagnosis-row" key={candidate.disease_id}>
-                      <span>{candidate.disease_name}</span>
-                      <span>{candidate.score} {language === 'hi' ? 'स्कोर / score' : 'score'}</span>
-                    </div>
-                  ))}
+              {diagnosis.model && <p className="model-badge">{diagnosis.model.replace(/_/g, ' ')}</p>}
+              {diagnosis.needs_clarification && <p className="clarification-notice">{t('needs_clarification_notice')}</p>}
+              {diagnosis.unsupported_symptoms?.length > 0 && (
+                <div className="unsupported-warning" role="status">
+                  <strong>{t('unsupported_symptoms_notice')}</strong>
+                  <p>{diagnosis.unsupported_symptoms.map(symptomLabel).join(', ')}</p>
                 </div>
               )}
+              {diagnosis.recognized_symptoms?.length > 0 && (
+                <p className="recognized-symptoms"><strong>{t('recognized_symptoms')}:</strong> {diagnosis.recognized_symptoms.map(symptomLabel).join(', ')}</p>
+              )}
+              {diagnosis.possible_diseases?.length > 0 && (
+                <div className="possible-diagnoses">
+                  <strong>{language === 'hi' ? 'शीर्ष मॉडल अनुमान / Top model predictions' : 'Top model predictions'}</strong>
+                  {diagnosis.possible_diseases.map(candidate => {
+                    const probability = Number(candidate.score ?? candidate.confidence ?? 0);
+                    return (
+                      <div className="possible-diagnosis-row" key={candidate.disease_id}>
+                        <span>{candidate.disease_name}</span>
+                        <span>{(probability * 100).toFixed(1)}% {t('confidence')}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="diagnosis-medicine-catalog">
+                <strong>{t('medicines')}</strong>
+                {loadingMedicines && <p>{t('medicine_catalog_loading')}</p>}
+                {medicineCatalogUnavailable && <p className="catalog-warning">{t('medicine_catalog_unavailable')}</p>}
+                {medicineCatalogError && <p className="catalog-warning">{t('medicine_catalog_error')}</p>}
+                {!loadingMedicines && !medicineCatalogUnavailable && !medicineCatalogError && medicineRecommendations.length === 0 && (
+                  <p>{t('no_medicines_selected')}</p>
+                )}
+                {medicineRecommendations.map(medicine => (
+                  <div className="catalog-medicine-row" key={medicine.id}>
+                    <strong>{language === 'hi' ? medicine.name_hi : medicine.name_en}</strong>
+                    <span>{medicine.dosage} · {medicine.frequency} · {medicine.duration_days} {language === 'hi' ? 'दिन' : 'days'}</span>
+                  </div>
+                ))}
+              </div>
             </div>
             <button
               onClick={handleGeneratePrescription}
-              disabled={loading}
+              disabled={loading || loadingMedicines}
               className="primary-btn"
             >
-              {loading ? 'Generating...' : t('generate_prescription')}
+              {loading ? t('submitting') : t('generate_prescription')}
             </button>
             <button onClick={handleReset} className="secondary-btn">{t('reset') || 'Start Over'}</button>
           </div>
@@ -659,8 +881,8 @@ function Dashboard() {
                     {session.diagnosis && (
                       <div className="history-diagnosis">
                         <strong>{t('disease')}:</strong> {session.diagnosis.disease_name}
-                        {session.diagnosis.confidence && (
-                          <span> ({(session.diagnosis.confidence * 100).toFixed(1)}%)</span>
+                        {session.diagnosis.model === 'random_forest' && session.diagnosis.confidence && (
+                          <span> ({(session.diagnosis.confidence * 100).toFixed(1)}% {t('confidence')})</span>
                         )}
                       </div>
                     )}
