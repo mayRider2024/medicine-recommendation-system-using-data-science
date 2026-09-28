@@ -7,14 +7,6 @@ import { voiceService } from '../voiceService';
 import cureLogo from '../components/logo/CureAI logo.png';
 import './Dashboard.css';
 
-const COMMON_SYMPTOMS = [
-  'fever', 'cough', 'sore_throat', 'body_ache', 'runny_nose', 'headache',
-  'fatigue', 'sneezing', 'nausea', 'dizziness', 'chills', 'chest_pain',
-  'shortness_of_breath', 'loss_of_taste', 'loss_of_smell', 'diarrhea',
-  'constipation', 'abdominal_pain', 'back_pain', 'joint_pain', 'rash',
-  'sweating', 'insomnia'
-];
-
 function Dashboard() {
   const { t, i18n } = useTranslation();
   const language = i18n.language?.startsWith('hi') ? 'hi' : 'en';
@@ -48,6 +40,7 @@ function Dashboard() {
   const [inputHistory, setInputHistory] = useState([]);
   const recorderRef = useRef(null);
   const lastTypedSymptomsRef = useRef([]);
+  const diagnosisRequestRef = useRef(false);
 
 
   const clarificationQuestions = [
@@ -77,25 +70,15 @@ function Dashboard() {
       }
     });
 
-    COMMON_SYMPTOMS.forEach(id => {
-      if (!options.has(id)) {
-        const translated = t(id);
-        options.set(id, {
-          id,
-          label: translated !== id ? translated : id.replace(/_/g, ' '),
-          unsupported: symptomCatalog.length > 0 && !symptomCatalog.some(item => item.id === id),
-        });
-      }
-    });
-
     return Array.from(options.values());
   }, [symptomCatalog, symptomAliases, t]);
 
   const symptomLabel = (id) => symptomOptions.find(item => item.id === id)?.label || t(id) || id.replace(/_/g, ' ');
   const searchableSymptoms = symptomOptions.filter(item => {
     const query = symptomSearch.trim().toLocaleLowerCase();
-    return query && !symptoms.includes(item.id) && `${item.id} ${item.label}`.toLocaleLowerCase().includes(query);
-  }).slice(0, 16);
+    if (!query) return !symptoms.includes(item.id);
+    return !symptoms.includes(item.id) && `${item.id} ${item.label}`.toLocaleLowerCase().includes(query);
+  });
 
   const extractSymptomsFromText = (text, strictMode) => {
     const detected = voiceService.extractSymptoms(text, strictMode);
@@ -324,11 +307,13 @@ function Dashboard() {
   };
 
   const handleDiagnose = async () => {
+    if (diagnosisRequestRef.current) return;
     if (symptoms.length === 0) {
       setError(t('empty_symptoms'));
       return;
     }
 
+    diagnosisRequestRef.current = true;
     const submittingClarification = step === 'questions';
     setLoading(true);
     setError('');
@@ -389,6 +374,7 @@ function Dashboard() {
     } catch (err) {
       setError(getDiagnosisErrorMessage(err));
     } finally {
+      diagnosisRequestRef.current = false;
       setLoading(false);
     }
   };
@@ -629,10 +615,14 @@ function Dashboard() {
               />
               {loadingSymptoms && <p className="input-hint">{t('symptom_catalog_loading')}</p>}
               {catalogError && <p className="catalog-warning">{t('symptom_catalog_error')}</p>}
-              {!loadingSymptoms && !catalogError && !symptomSearch.trim() && (
-                <p className="input-hint">{t('symptom_search_prompt')} ({symptomCatalog.length})</p>
+              {!loadingSymptoms && !catalogError && (
+                <div className="symptoms-list-header">
+                  <h3 className="common-symptoms-heading">
+                    {symptomSearch.trim() ? (t('search_results') || 'Search Results') : (t('all_symptoms') || 'All Symptoms')} ({searchableSymptoms.length})
+                  </h3>
+                </div>
               )}
-              {symptomSearch.trim() && (
+              {!loadingSymptoms && !catalogError && (
                 searchableSymptoms.length > 0 ? (
                   <div className="symptoms-grid symptom-search-results">
                     {searchableSymptoms.map(option => (
@@ -645,25 +635,6 @@ function Dashboard() {
                 ) : <p className="input-hint">{t('no_symptom_matches')}</p>
               )}
             </section>
-
-            <h3 className="common-symptoms-heading">{t('common_symptoms')}</h3>
-            <div className="symptoms-grid">
-              {COMMON_SYMPTOMS.map(symptom => {
-                const option = symptomOptions.find(item => item.id === symptom);
-                return (
-                  <button
-                    key={symptom}
-                    onClick={() => toggleSymptom(symptom)}
-                    className={`symptom-btn ${symptoms.includes(symptom) ? 'active' : ''}`}
-                    type="button"
-                    disabled={loading}
-                  >
-                    <span>{symptomLabel(symptom)}</span>
-                    {option?.unsupported && <small className="unsupported-tag">{t('unsupported_label')}</small>}
-                  </button>
-                );
-              })}
-            </div>
             <button
               onClick={handleDiagnose}
               disabled={symptoms.length === 0 || loading}
