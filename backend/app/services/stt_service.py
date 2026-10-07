@@ -21,19 +21,23 @@ class WhisperSTT(STTProvider):
         "mr": "marathi"
     }
 
-    def __init__(self, model_size: str = "base"):
+    def __init__(self, model_size: str = None):
         """
-        Initialize Whisper model
+        Initialize Whisper model (lazy loading to save memory)
 
         Args:
-            model_size: "tiny", "base", "small", "medium", "large"
-                       - larger = more accurate, slower, more memory
-                       - base is recommended for production
+            model_size: "tiny", "base", "small" (defaults to WHISPER_MODEL env var or "tiny")
         """
-        self.model_size = model_size
-        print(f"Loading Whisper model ({model_size})...")
-        self.model = whisper.load_model(model_size)
-        print("Whisper model loaded successfully")
+        self.model_size = model_size or os.getenv("WHISPER_MODEL", "tiny")
+        self.model = None
+
+    def _load_model(self):
+        if self.model is None:
+            import whisper
+            print(f"Loading Whisper model ({self.model_size})...")
+            self.model = whisper.load_model(self.model_size)
+            print("Whisper model loaded successfully")
+        return self.model
 
     def transcribe(self, audio_path: str, language: str = "en") -> dict:
         """
@@ -58,8 +62,9 @@ class WhisperSTT(STTProvider):
         whisper_lang = self.SUPPORTED_LANGUAGES.get(language, "english")
 
         try:
+            model = self._load_model()
             # Transcribe with language hint
-            result = self.model.transcribe(
+            result = model.transcribe(
                 audio_path,
                 language=whisper_lang,
                 fp16=False,  # Use CPU-friendly float32
