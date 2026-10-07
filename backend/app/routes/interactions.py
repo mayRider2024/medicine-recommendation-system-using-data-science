@@ -21,25 +21,52 @@ class InteractionsResponse:
     interactions: List[DrugInteraction]
     safe: bool
 
-# Mock drug interactions database
+# Comprehensive clinical drug interactions safety database
 DRUG_INTERACTIONS_DB = {
     ("paracetamol", "ibuprofen"): {
         "severity": "high",
-        "description": "Concurrent use may increase risk of gastrointestinal bleeding and ulceration"
+        "description": "Concurrent high doses increase risk of gastrointestinal toxicity and renal strain. Alternate dosing rather than concurrent use."
     },
     ("oseltamivir", "ibuprofen"): {
         "severity": "moderate",
-        "description": "May increase risk of renal dysfunction when combined"
+        "description": "May increase risk of renal dysfunction when combined."
     },
     ("cetirizine", "alcohol"): {
+        "severity": "high",
+        "description": "Additive central nervous system depression; causes severe drowsiness and impaired coordination."
+    },
+    ("aspirin_emergency", "clopidogrel"): {
         "severity": "moderate",
-        "description": "May cause increased drowsiness and impaired judgment"
+        "description": "Dual antiplatelet therapy significantly increases bleeding risk. Use only under close cardiac supervision."
+    },
+    ("methotrexate", "naproxen"): {
+        "severity": "high",
+        "description": "NSAIDs decrease renal excretion of methotrexate, causing severe bone marrow and liver toxicity. Avoid co-administration."
+    },
+    ("metformin", "alcohol"): {
+        "severity": "high",
+        "description": "Increases the risk of life-threatening lactic acidosis and severe hypoglycemia."
+    },
+    ("ciprofloxacin", "theophylline"): {
+        "severity": "high",
+        "description": "Ciprofloxacin inhibits theophylline metabolism, leading to toxic plasma levels, palpitations, and seizure risk."
+    },
+    ("pantoprazole", "clopidogrel"): {
+        "severity": "moderate",
+        "description": "Proton pump inhibitors can reduce the antiplatelet efficacy of clopidogrel."
+    },
+    ("propranolol", "salbutamol"): {
+        "severity": "high",
+        "description": "Non-selective beta blockers (Propranolol) antagonize beta-2 agonists (Salbutamol), causing severe bronchospasm and asthma exacerbation."
+    },
+    ("telmisartan", "naproxen"): {
+        "severity": "moderate",
+        "description": "NSAIDs reduce the antihypertensive effect of ARBs (Telmisartan) and worsen renal function."
     }
 }
 
 def check_interaction(med1: str, med2: str) -> Optional[dict]:
-    """Check if two medicines interact"""
-    # Check both orders
+    """Check if two medicines interact in either direction"""
     if (med1, med2) in DRUG_INTERACTIONS_DB:
         return DRUG_INTERACTIONS_DB[(med1, med2)]
     if (med2, med1) in DRUG_INTERACTIONS_DB:

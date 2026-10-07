@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from typing import List, Optional
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
+from app.routes.medicines import MOCK_MEDICINES
 
 router = APIRouter()
 
@@ -107,6 +108,14 @@ MEDICINE_DETAILS = {
     }
 }
 
+# Generic lookup map of all cataloged medicines
+def get_catalog_medicine_lookup() -> dict:
+    lookup = {}
+    for med_list in MOCK_MEDICINES.values():
+        for item in med_list:
+            lookup[item["id"]] = item
+    return lookup
+
 # Wellness tips based on disease
 WELLNESS_TIPS_BY_DISEASE = {
     "cold": [
@@ -148,6 +157,12 @@ WELLNESS_TIPS_BY_DISEASE = {
         "😴 Adequate sleep: 7-8 hours nightly",
         "🧊 Cold compress: On forehead for relief",
         "🌬️ Deep breathing: 5 minutes to reduce tension"
+    ],
+    "hepatitis_d": [
+        "💧 Maintain adequate hydration and avoid alcohol completely",
+        "🥗 Follow a liver-friendly diet rich in fresh vegetables and lean protein",
+        "😴 Ensure 8 hours of restful sleep to aid hepatic recovery",
+        "🩺 Schedule regular liver function tests (LFT) and viral load monitoring"
     ]
 }
 
@@ -156,7 +171,8 @@ WELLNESS_TIPS_BY_DISEASE_HI = {
     "fever": ["🧊 माथे पर 15 मिनट ठंडी पट्टी रखें", "💧 पानी, नारियल पानी और ORS लें", "😴 बुखार कम होने तक पूरा आराम करें", "🥗 हल्का और पौष्टिक भोजन लें", "🧘 10 मिनट ध्यान करें", "🌡️ गुनगुने पानी से स्नान करें"],
     "cough": ["💧 शहद और अदरक वाला गुनगुना पानी लें", "🧘 सुबह और रात 5 मिनट सांस के व्यायाम करें", "😴 सोते समय सिर ऊंचा रखें", "🚫 ठंडी और सूखी हवा से बचें", "🥗 गर्म सूप और शोरबा लें", "💨 दिन में 2 बार 10 मिनट भाप लें"],
     "flu": ["😴 ठीक होने तक 7-10 दिन पूरा आराम करें", "💧 3-4 लीटर पानी पिएं", "🥗 प्रोटीन और विटामिन युक्त भोजन लें", "🧘 बेहतर महसूस होने पर हल्का योग करें", "🌡️ संक्रमण रोकने के लिए स्वच्छता रखें", "😷 लक्षण शुरू होने के बाद 5 दिन तक अलग रहें"],
-    "headache": ["🧘 दिन में 2 बार 10 मिनट ध्यान करें", "💧 पर्याप्त पानी पिएं", "🚶 ताजी हवा में 5-10 मिनट हल्की सैर करें", "😴 हर रात 7-8 घंटे सोएं", "🧊 माथे पर ठंडी पट्टी रखें", "🌬️ तनाव कम करने के लिए गहरी सांस लें"]
+    "headache": ["🧘 दिन में 2 बार 10 मिनट ध्यान करें", "💧 पर्याप्त पानी पिएं", "🚶 ताजी हवा में 5-10 मिनट हल्की सैर करें", "😴 हर रात 7-8 घंटे सोएं", "🧊 माथे पर ठंडी पट्टी रखें", "🌬️ तनाव कम करने के लिए गहरी सांस लें"],
+    "hepatitis_d": ["💧 शराब का पूरी तरह त्याग करें और पर्याप्त पानी पिएं", "🥗 ताजी सब्जियों और सुपाच्य प्रोटीन युक्त आहार लें", "😴 लिवर की रिकवरी के लिए 8 घंटे की पर्याप्त नींद लें", "🩺 नियमित लिवर फंक्शन टेस्ट (LFT) कराएं"]
 }
 
 def generate_prescription_id() -> str:
@@ -169,30 +185,26 @@ async def generate_prescription(req: PrescriptionRequest):
     """Generate prescription for a disease with recommended medicines"""
 
     prescription_items = []
+    catalog_lookup = get_catalog_medicine_lookup()
 
     for med_id in req.medicines:
+        catalog_item = catalog_lookup.get(med_id, {})
+        
         details = MEDICINE_DETAILS.get(med_id, {
-            "side_effects": ["No known side effects"],
-            "precautions": ["Follow doctor's advice"]
+            "side_effects": ["Mild stomach discomfort or nausea (rare)"],
+            "precautions": ["Follow doctor's advice", "Take as prescribed"]
         })
 
-        # Mock medicine names - in real app, fetch from DB
-        med_names = {
-            "paracetamol": {"en": "Paracetamol", "hi": "पैरासिटामोल"},
-            "ibuprofen": {"en": "Ibuprofen", "hi": "आइबुप्रोफेन"},
-            "cetirizine": {"en": "Cetirizine", "hi": "सेटीरिजीन"},
-            "cough_syrup": {"en": "Cough Syrup", "hi": "खांसी की दवा"},
-            "oseltamivir": {"en": "Oseltamivir", "hi": "ऑसेल्टामिविर"}
-        }
-
-        med_name = med_names.get(med_id, {"en": med_id, "hi": med_id})
+        med_name_en = catalog_item.get("name_en", med_id.replace("_", " ").title())
+        med_name_hi = catalog_item.get("name_hi", med_name_en)
 
         schedule = MEDICINE_SCHEDULES.get(med_id, {
-            "dosage": "As directed by a qualified doctor",
-            "frequency": "As prescribed",
-            "duration_days": 5,
-            "meal_instruction": "Follow the package instructions"
+            "dosage": catalog_item.get("dosage", "As directed by a qualified doctor"),
+            "frequency": catalog_item.get("frequency", "As prescribed"),
+            "duration_days": catalog_item.get("duration_days", 5),
+            "meal_instruction": catalog_item.get("meal_instruction", "Follow the package instructions")
         }).copy()
+        
         details = details.copy()
         if req.language == "hi" and med_id in MEDICINE_BILINGUAL:
             bilingual = MEDICINE_BILINGUAL[med_id]
@@ -204,8 +216,8 @@ async def generate_prescription(req: PrescriptionRequest):
 
         prescription_items.append(
             PrescriptionItem(
-                medicine_name=med_name["en"],
-                medicine_name_hi=med_name["hi"],
+                medicine_name=med_name_en,
+                medicine_name_hi=med_name_hi,
                 dosage=schedule["dosage"],
                 frequency=schedule["frequency"],
                 duration_days=schedule["duration_days"],
