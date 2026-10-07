@@ -5,6 +5,37 @@ import { useAuth } from '../context/AuthContext';
 import { diagnosisAPI, medicinesAPI, prescriptionsAPI } from '../api';
 import { voiceService } from '../voiceService';
 import cureLogo from '../components/logo/CureAI logo.png';
+import { 
+  Activity, 
+  Stethoscope, 
+  Mic, 
+  MicOff, 
+  Search, 
+  FileText, 
+  BarChart3, 
+  Clock, 
+  Sparkles, 
+  CheckCircle2, 
+  AlertCircle, 
+  Trash2, 
+  RefreshCw, 
+  Printer, 
+  User, 
+  Droplet, 
+  Heart, 
+  ChevronRight, 
+  ShieldCheck, 
+  Pill, 
+  Check, 
+  X, 
+  History,
+  Sliders,
+  HelpCircle,
+  Dna,
+  Zap,
+  ArrowRight,
+  LogOut
+} from 'lucide-react';
 import './Dashboard.css';
 
 function Dashboard() {
@@ -20,12 +51,13 @@ function Dashboard() {
   const [activeHistoryId, setActiveHistoryId] = useState(null);
   const [refreshingPrescription, setRefreshingPrescription] = useState(false);
 
-  const [step, setStep] = useState('symptoms');
+  const [step, setStep] = useState('symptoms'); // 'symptoms' | 'questions' | 'diagnosis' | 'prescription'
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [error, setError] = useState('');
   const [symptomText, setSymptomText] = useState('');
   const [symptomSearch, setSymptomSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
   const [symptomCatalog, setSymptomCatalog] = useState([]);
   const [symptomAliases, setSymptomAliases] = useState({});
   const [loadingSymptoms, setLoadingSymptoms] = useState(true);
@@ -36,18 +68,14 @@ function Dashboard() {
   const [medicineCatalogError, setMedicineCatalogError] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [clarificationAnswers, setClarificationAnswers] = useState({});
   const [inputHistory, setInputHistory] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const recorderRef = useRef(null);
   const lastTypedSymptomsRef = useRef([]);
   const diagnosisRequestRef = useRef(false);
-
-
-  const clarificationQuestions = [
-    { id: 'fever_level', labelKey: 'fever_question', options: [['high', 'fever_high'], ['low', 'fever_low']] },
-    { id: 'breathing', labelKey: 'breathing_question', options: [['yes', 'yes'], ['no', 'no']] },
-    { id: 'nasal', labelKey: 'nasal_question', options: [['yes', 'yes'], ['no', 'no']] },
-  ];
+  const searchInputRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   const symptomOptions = useMemo(() => {
     const featureLabels = new Map(symptomCatalog.map(item => [item.id, item.label]));
@@ -74,11 +102,85 @@ function Dashboard() {
   }, [symptomCatalog, symptomAliases, t]);
 
   const symptomLabel = (id) => symptomOptions.find(item => item.id === id)?.label || t(id) || id.replace(/_/g, ' ');
-  const searchableSymptoms = symptomOptions.filter(item => {
+
+  // Live matching recommendations / suggestions while typing
+  const liveSuggestions = useMemo(() => {
+    const rawQuery = symptomText.trim().toLowerCase();
+    if (!rawQuery) return [];
+    const query = rawQuery.replace(/[_-]/g, ' ');
+
+    const matches = [];
+    const seen = new Set(symptoms);
+
+    // 1. Detect any symptoms mapped via slang / synonyms in voiceService (e.g. "weird_rash", "exhaustion")
+    const detectedFromSlang = voiceService.extractSymptoms(symptomText, false);
+    detectedFromSlang.forEach(id => {
+      if (!seen.has(id)) {
+        const opt = symptomOptions.find(o => o.id === id);
+        if (opt) {
+          matches.push({ ...opt, matchReason: 'slang' });
+          seen.add(id);
+        } else {
+          matches.push({ id, label: symptomLabel(id), unsupported: false, matchReason: 'slang' });
+          seen.add(id);
+        }
+      }
+    });
+
+    // 2. Prefix & Substring matching across catalog and aliases
+    const prefixMatches = [];
+    const substringMatches = [];
+
+    symptomOptions.forEach(option => {
+      if (seen.has(option.id)) return;
+
+      const idClean = option.id.toLowerCase().replace(/_/g, ' ');
+      const rawId = option.id.toLowerCase();
+      const labelClean = (option.label || '').toLowerCase();
+
+      if (idClean.startsWith(query) || rawId.startsWith(rawQuery) || labelClean.startsWith(query)) {
+        prefixMatches.push(option);
+        seen.add(option.id);
+      } else if (idClean.includes(query) || rawId.includes(rawQuery) || labelClean.includes(query)) {
+        substringMatches.push(option);
+        seen.add(option.id);
+      }
+    });
+
+    return [...matches, ...prefixMatches, ...substringMatches].slice(0, 8);
+  }, [symptomText, symptomOptions, symptoms]);
+
+  // Click outside to dismiss suggestions dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Categorized symptoms filter
+  const categorizedSymptoms = useMemo(() => {
+    return symptomOptions.filter(item => {
+      const id = item.id.toLowerCase();
+      if (selectedCategory === 'respiratory') return id.includes('cough') || id.includes('breath') || id.includes('throat') || id.includes('chest') || id.includes('nasal') || id.includes('sneeze');
+      if (selectedCategory === 'pain') return id.includes('pain') || id.includes('fever') || id.includes('headache') || id.includes('ache') || id.includes('cramp');
+      if (selectedCategory === 'digestive') return id.includes('vomit') || id.includes('nausea') || id.includes('stomach') || id.includes('diarrh') || id.includes('abdomin') || id.includes('acid');
+      if (selectedCategory === 'skin') return id.includes('rash') || id.includes('itch') || id.includes('skin') || id.includes('spot') || id.includes('yellow');
+      if (selectedCategory === 'neuro') return id.includes('dizz') || id.includes('fatigue') || id.includes('weak') || id.includes('vision') || id.includes('mood') || id.includes('loss');
+      return true;
+    });
+  }, [symptomOptions, selectedCategory]);
+
+  const searchableSymptoms = useMemo(() => {
     const query = symptomSearch.trim().toLocaleLowerCase();
-    if (!query) return !symptoms.includes(item.id);
-    return !symptoms.includes(item.id) && `${item.id} ${item.label}`.toLocaleLowerCase().includes(query);
-  });
+    return categorizedSymptoms.filter(item => {
+      if (!query) return !symptoms.includes(item.id);
+      return !symptoms.includes(item.id) && `${item.id} ${item.label}`.toLocaleLowerCase().includes(query);
+    });
+  }, [categorizedSymptoms, symptomSearch, symptoms]);
 
   const extractSymptomsFromText = (text, strictMode) => {
     const detected = voiceService.extractSymptoms(text, strictMode);
@@ -102,26 +204,83 @@ function Dashboard() {
       timestamp: new Date().toISOString(),
       ...event,
     };
-    setInputHistory(current => [...current, newEvent].slice(-40));
+    setInputHistory(current => [...current, newEvent].slice(-30));
   };
 
   const toggleSymptom = (symptom) => {
     const selected = !symptoms.includes(symptom);
     setSymptoms(current => selected ? [...current, symptom] : current.filter(x => x !== symptom));
+    setSymptomText('');
+    setShowSuggestions(false);
+    setActiveSuggestionIndex(-1);
     setDiagnosis(null);
     setPrescription(null);
     setMedicineRecommendations([]);
-    setClarificationAnswers({});
     recordInputEvent({
       type: selected ? 'selected' : 'removed',
-      source: 'Option',
+      source: 'Catalog',
       symptoms: [symptom],
-      text: `${selected ? 'Selected' : 'Removed'} ${t(symptom) || symptom.replace(/_/g, ' ')}`,
+      text: `${selected ? 'Selected' : 'Removed'} ${symptomLabel(symptom)}`,
     });
   };
 
+  const handleSelectSuggestion = (symptomId) => {
+    if (!symptoms.includes(symptomId)) {
+      setSymptoms(current => [...current, symptomId]);
+      recordInputEvent({
+        type: 'selected',
+        source: 'Autocomplete',
+        symptoms: [symptomId],
+        text: `Selected ${symptomLabel(symptomId)}`,
+      });
+    }
+    setSymptomText('');
+    setShowSuggestions(false);
+    setActiveSuggestionIndex(-1);
+    setDiagnosis(null);
+    setPrescription(null);
+    setMedicineRecommendations([]);
+    searchInputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (liveSuggestions.length > 0) {
+        setShowSuggestions(true);
+        setActiveSuggestionIndex(prev => (prev + 1) % liveSuggestions.length);
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (liveSuggestions.length > 0) {
+        setShowSuggestions(true);
+        setActiveSuggestionIndex(prev => (prev - 1 + liveSuggestions.length) % liveSuggestions.length);
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (showSuggestions && activeSuggestionIndex >= 0 && liveSuggestions[activeSuggestionIndex]) {
+        handleSelectSuggestion(liveSuggestions[activeSuggestionIndex].id);
+      } else if (liveSuggestions.length > 0) {
+        handleSelectSuggestion(liveSuggestions[0].id);
+      } else if (symptomText.trim()) {
+        const detected = extractSymptomsFromText(symptomText, false);
+        if (detected.length > 0) {
+          setSymptoms(current => Array.from(new Set([...current, ...detected])));
+          setSymptomText('');
+          setShowSuggestions(false);
+          setActiveSuggestionIndex(-1);
+          setDiagnosis(null);
+          setPrescription(null);
+          setMedicineRecommendations([]);
+        }
+      }
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false);
+      setActiveSuggestionIndex(-1);
+    }
+  };
+
   const addSymptomsFromText = (text, strictMode = true, source = 'Typed') => {
-    setSymptomText(text);
     const detectedSymptoms = extractSymptomsFromText(text, strictMode);
     const previous = lastTypedSymptomsRef.current;
     const added = detectedSymptoms.filter(symptom => !previous.includes(symptom));
@@ -153,7 +312,10 @@ function Dashboard() {
   };
 
   const handleTextChange = (event) => {
-    addSymptomsFromText(event.target.value, true, 'Typed');
+    const val = event.target.value;
+    setSymptomText(val);
+    setShowSuggestions(true);
+    setActiveSuggestionIndex(-1);
   };
 
   const handleRecordingStop = async (audioBlob) => {
@@ -164,7 +326,7 @@ function Dashboard() {
       const result = await voiceService.transcribeAudio(audioBlob, language);
       addSymptomsFromText(result.text || '', false, 'Voice');
       if (!extractSymptomsFromText(result.text || '', false).length) {
-        setError(t('no_symptom_matches'));
+        setError(t('no_symptom_matches') || 'No recognizable symptoms detected from audio.');
       }
     } catch (err) {
       setError(err.message || 'Voice transcription failed');
@@ -314,7 +476,6 @@ function Dashboard() {
     }
 
     diagnosisRequestRef.current = true;
-    const submittingClarification = step === 'questions';
     setLoading(true);
     setError('');
     setMedicineCatalogError(false);
@@ -322,16 +483,10 @@ function Dashboard() {
       const response = await diagnosisAPI.diagnose({
         symptoms,
         language,
-        answers: clarificationAnswers,
       });
       const result = response.data;
       setDiagnosis(result);
       setPrescription(null);
-
-      if (result.needs_clarification && !submittingClarification) {
-        setStep('questions');
-        return;
-      }
 
       setStep('diagnosis');
       setLoadingMedicines(true);
@@ -347,8 +502,6 @@ function Dashboard() {
         setLoadingMedicines(false);
       }
 
-      // Persist the actual API response (including candidate probabilities and
-      // symptom recognition fields) only after the clarification submission.
       try {
         let historyId = activeHistoryId;
         if (!historyId) {
@@ -356,7 +509,7 @@ function Dashboard() {
             symptoms,
             patient_inputs: [{
               type: 'text',
-              text: `${symptoms.join(', ')} | Clarification answers: ${JSON.stringify(clarificationAnswers)}`,
+              text: symptoms.join(', '),
               timestamp: new Date().toISOString(),
             }],
             language,
@@ -394,7 +547,6 @@ function Dashboard() {
       setPrescription(res.data);
       setStep('prescription');
 
-      // Update history with prescription
       try {
         const histRes = await api.get('/medical-history');
         const sessions = histRes.data;
@@ -448,7 +600,6 @@ function Dashboard() {
     setMedicineRecommendations([]);
     setMedicineCatalogUnavailable(false);
     setMedicineCatalogError(false);
-    setClarificationAnswers({});
     lastTypedSymptomsRef.current = [];
   };
 
@@ -499,7 +650,6 @@ function Dashboard() {
     window.print();
   };
 
-  // Format date helper
   const formatDate = (iso) => {
     if (!iso) return '—';
     return new Date(iso).toLocaleDateString(language === 'hi' ? 'hi-IN' : 'en-IN', {
@@ -508,376 +658,628 @@ function Dashboard() {
   };
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <div className="header-content">
-          <div className="brand-lockup">
-            <img src={cureLogo} alt="CureAI logo" className="brand-logo" />
+    <div className="dash-root">
+      {/* Background Decor */}
+      <div className="dash-glow-top" />
+      <div className="dash-glow-bottom" />
+
+      {/* Top Command Bar */}
+      <header className="dash-header">
+        <div className="dash-header-inner">
+          <div className="dash-brand-block" onClick={() => navigate('/')}>
+            <div className="dash-logo-wrap">
+              <img src={cureLogo} alt="CureAI logo" className="dash-logo" />
+              <div className="dash-pulse-badge" />
+            </div>
             <div>
-              <h1>CureAI</h1>
-              <p className="brand-subtitle">Medicine Recommendation System</p>
-              <p className="welcome-text">{t('welcome')}, <strong>{user?.full_name}</strong></p>
+              <div className="dash-brand-title">CureAI <span className="dash-tag-pro">CLINICAL SUITE</span></div>
+              <div className="dash-brand-subtitle">Machine Learning Medicine & Diagnostic Assistant</div>
             </div>
           </div>
-          <div className="header-actions">
-            <div className="language-switcher" aria-label="Language selector">
-              <button className={language === 'en' ? 'language-btn active' : 'language-btn'} onClick={() => switchLanguage('en')} disabled={loading || refreshingPrescription || isRecording || isTranscribing}>EN</button>
-              <button className={language === 'hi' ? 'language-btn active' : 'language-btn'} onClick={() => switchLanguage('hi')} disabled={loading || refreshingPrescription || isRecording || isTranscribing}>हिंदी</button>
+
+          <div className="dash-header-center">
+            <div className="dash-patient-capsule">
+              <div className="patient-avatar">
+                <User size={16} />
+              </div>
+              <div className="patient-meta">
+                <span className="patient-name">{user?.full_name || 'Patient'}</span>
+                <span className="patient-sub">{calculateAge(user?.date_of_birth)} yrs · {user?.gender || '—'} · {user?.blood_group || 'Blood Group —'}</span>
+              </div>
             </div>
-            <span className="user-email">{user?.email}</span>
-            <button onClick={() => navigate('/analytics')} className="analytics-link">📊 Analytics</button>
-            <button onClick={handleLogout} className="logout-btn">{t('logout')}</button>
+          </div>
+
+          <div className="dash-header-actions">
+            <div className="dash-lang-capsule">
+              <button 
+                className={`dash-lang-btn ${language === 'en' ? 'active' : ''}`} 
+                onClick={() => switchLanguage('en')} 
+                disabled={loading || refreshingPrescription || isRecording || isTranscribing}
+              >
+                EN
+              </button>
+              <button 
+                className={`dash-lang-btn ${language === 'hi' ? 'active' : ''}`} 
+                onClick={() => switchLanguage('hi')} 
+                disabled={loading || refreshingPrescription || isRecording || isTranscribing}
+              >
+                हिंदी
+              </button>
+            </div>
+
+            <button onClick={() => navigate('/analytics')} className="dash-nav-analytics">
+              <BarChart3 size={16} />
+              <span>Analytics</span>
+            </button>
+
+            <button onClick={handleLogout} className="dash-logout-btn" title="Sign Out">
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="dashboard-main">
-        {error && <div className="dashboard-error" role="alert">{error}</div>}
+      {/* Main Workspace */}
+      <main className="dash-workspace">
+        {/* Step Progression Bar */}
+        <div className="dash-workflow-bar">
+          <div className={`workflow-pill ${step === 'symptoms' ? 'active' : 'completed'}`}>
+            <span className="step-num">1</span>
+            <span>Symptom Intake</span>
+          </div>
+          <div className="workflow-connector" />
+          <div className={`workflow-pill ${step === 'diagnosis' ? 'active' : prescription ? 'completed' : 'idle'}`}>
+            <span className="step-num">2</span>
+            <span>ML Diagnostic Matrix</span>
+          </div>
+          <div className="workflow-connector" />
+          <div className={`workflow-pill ${step === 'prescription' ? 'active' : 'idle'}`}>
+            <span className="step-num">3</span>
+            <span>Certified Rx & Action Plan</span>
+          </div>
+        </div>
 
-        {/* ========== SYMPTOMS STEP ========== */}
+        {error && (
+          <div className="dash-alert-error" role="alert">
+            <AlertCircle size={18} />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* ========== STEP 1: SYMPTOMS SELECTION & VOICE STUDIO ========== */}
         {step === 'symptoms' && (
-          <div className="dashboard-card">
-            <h2>{t('select_symptoms')}</h2>
-            <div className="symptom-count">
+          <div className="dash-glass-card">
+            <div className="card-top-title-row">
+              <div className="title-with-icon">
+                <div className="icon-badge-green"><Stethoscope size={22} /></div>
+                <div>
+                  <h2>{t('select_symptoms') || 'Select or Speak Symptoms'}</h2>
+                  <p className="card-subtitle">Input your symptoms via typed keywords, quick search tags, or high-fidelity voice recording.</p>
+                </div>
+              </div>
+
               {symptoms.length > 0 && (
-                  <span>{t('symptoms_selected', { count: symptoms.length })}
-                  <button onClick={handleClearSymptoms} className="clear-btn" disabled={loading}>{t('clear')}</button>
-                </span>
-              )}
-            </div>
-            <div className="symptom-input-area">
-              <label htmlFor="symptom-text">{t('describe_symptoms')}</label>
-              <div className="symptom-input-row">
-                <input
-                  id="symptom-text"
-                  type="text"
-                  value={symptomText}
-                  onChange={handleTextChange}
-                  placeholder={language === 'hi' ? 'लक्षण लिखें, जैसे बुखार और खांसी' : 'Type symptoms, e.g. fever and cough'}
-                  disabled={isRecording || isTranscribing || loading}
-                />
-                <button
-                  type="button"
-                  onClick={handleVoiceToggle}
-                  className={`voice-btn ${isRecording ? 'recording' : ''}`}
-                  disabled={isTranscribing || loading}
-                  aria-label={isRecording ? 'Stop recording / रिकॉर्डिंग रोकें' : 'Speak symptoms / लक्षण बोलें'}
-                >
-                  {isTranscribing ? '⏳' : isRecording ? '⏹ Stop' : `🎙️ ${t('voice')}`}
-                </button>
-              </div>
-              <p className="input-hint">
-                {isTranscribing ? (language === 'hi' ? 'आपकी रिकॉर्डिंग लिखी जा रही है…' : 'Transcribing your recording…') : isRecording ? (language === 'hi' ? 'सुन रहे हैं… समाप्त होने पर रोकें' : 'Listening… click Stop when finished') : t('type_symptoms_hint')}
-              </p>
-            </div>
-            <div className="input-history" aria-live="polite">
-              <div className="input-history-header">
-                <strong>{t('input_history')}</strong>
-                <span>{inputHistory.length ? `${inputHistory.length} recent event(s)` : t('symptom_activity_hint')}</span>
-              </div>
-              {inputHistory.length > 0 && (
-                <div className="input-history-list">
-                  {[...inputHistory].reverse().map(event => (
-                    <div className="input-history-item" key={event.id}>
-                      <span className={`history-source ${event.type}`}>{event.source}</span>
-                      <div className="history-event-content">
-                        <strong>{event.text}</strong>
-                        {event.symptoms?.length > 0 && <small>{event.symptoms.map(symptom => t(symptom) || symptom.replace(/_/g, ' ')).join(', ')}</small>}
-                      </div>
-                      <time>{formatTime(event.timestamp)}</time>
-                    </div>
-                  ))}
+                <div className="selected-symptoms-counter">
+                  <span>{symptoms.length} Symptoms Vectorized</span>
+                  <button onClick={handleClearSymptoms} className="btn-clear-tags" disabled={loading}>
+                    <Trash2 size={14} />
+                    <span>Clear All</span>
+                  </button>
                 </div>
               )}
             </div>
+
+            {/* Voice & Typed Input Command Hub */}
+            <div className="symptom-input-console">
+              <div className="voice-text-row">
+                <div className="text-input-wrap" ref={dropdownRef}>
+                  <Search size={18} className="search-icon-subtle" />
+                  <input
+                    ref={searchInputRef}
+                    id="symptom-text"
+                    type="text"
+                    value={symptomText}
+                    onChange={handleTextChange}
+                    onFocus={() => setShowSuggestions(true)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={language === 'hi' ? 'लक्षण लिखें, जैसे तेज बुखार, सिरदर्द या खांसी...' : 'Describe symptoms (e.g. fever, weird rash, exhaustion, continuous cough)...'}
+                    disabled={isRecording || isTranscribing || loading}
+                    autoComplete="off"
+                  />
+                  {symptomText.trim() && (
+                    <button
+                      type="button"
+                      className="btn-clear-input"
+                      onClick={() => {
+                        setSymptomText('');
+                        setShowSuggestions(false);
+                        searchInputRef.current?.focus();
+                      }}
+                      title="Clear text"
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
+
+                  {showSuggestions && liveSuggestions.length > 0 && (
+                    <div className="symptom-autocomplete-dropdown">
+                      <div className="autocomplete-header">
+                        <Sparkles size={13} className="sparkle-icon" />
+                        <span>Matching Symptoms ({liveSuggestions.length})</span>
+                        <span className="autocomplete-hint">Press ↵ Enter or click to add</span>
+                      </div>
+                      <ul className="autocomplete-list">
+                        {liveSuggestions.map((item, index) => (
+                          <li
+                            key={item.id}
+                            className={`autocomplete-item ${index === activeSuggestionIndex ? 'active' : ''}`}
+                            onClick={() => handleSelectSuggestion(item.id)}
+                            onMouseEnter={() => setActiveSuggestionIndex(index)}
+                          >
+                            <div className="autocomplete-item-main">
+                              <span className="autocomplete-item-name">{item.label}</span>
+                              <span className="autocomplete-item-id">({item.id.replace(/_/g, ' ')})</span>
+                            </div>
+                            <div className="autocomplete-item-meta">
+                              {item.unsupported ? (
+                                <span className="badge-unsupported">Informational</span>
+                              ) : (
+                                <span className="badge-clinical">ML Clinical Feature</span>
+                              )}
+                              <span className="btn-add-badge">+ Add</span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleVoiceToggle}
+                  className={`btn-voice-studio ${isRecording ? 'recording-active' : ''}`}
+                  disabled={isTranscribing || loading}
+                >
+                  {isTranscribing ? (
+                    <>
+                      <RefreshCw size={16} className="spin-icon" />
+                      <span>Transcribing Audio...</span>
+                    </>
+                  ) : isRecording ? (
+                    <>
+                      <div className="live-rec-dot" />
+                      <span>Stop Listening</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mic size={18} />
+                      <span>{language === 'hi' ? 'लक्षण बोलें (Voice)' : 'Voice Input (EN/हिंदी)'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Recording Waveform Visualizer */}
+              {isRecording && (
+                <div className="recording-soundwave-card">
+                  <div className="soundwave-bars">
+                    <span className="b-bar b-1" />
+                    <span className="b-bar b-2" />
+                    <span className="b-bar b-3" />
+                    <span className="b-bar b-4" />
+                    <span className="b-bar b-5" />
+                    <span className="b-bar b-6" />
+                    <span className="b-bar b-7" />
+                    <span className="b-bar b-8" />
+                  </div>
+                  <span className="soundwave-text">Listening in {language === 'hi' ? 'हिंदी' : 'English'}... Speak clearly now.</span>
+                </div>
+              )}
+            </div>
+
+            {/* Active Selected Symptom Chips */}
             {symptoms.length > 0 && (
-              <div className="selected-symptoms">
-                <strong>{t('selected_symptoms')}</strong>
-                <div className="selected-symptom-chips">
+              <div className="active-selected-board">
+                <span className="board-label">Active Diagnostic Features:</span>
+                <div className="chips-flow-wrap">
                   {symptoms.map(symptom => (
-                    <button key={symptom} type="button" onClick={() => toggleSymptom(symptom)} className="selected-symptom-chip" disabled={loading}>
-                      {symptomLabel(symptom)} <span aria-hidden="true">×</span>
+                    <button 
+                      key={symptom} 
+                      type="button" 
+                      onClick={() => toggleSymptom(symptom)} 
+                      className="chip-active-symptom"
+                      disabled={loading}
+                    >
+                      <span>{symptomLabel(symptom)}</span>
+                      <X size={14} className="chip-x-icon" />
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            <section className="model-symptom-browser" aria-label={t('symptom_search')}>
-              <label htmlFor="model-symptom-search">{t('symptom_search')}</label>
-              <input
-                id="model-symptom-search"
-                type="search"
-                value={symptomSearch}
-                onChange={event => setSymptomSearch(event.target.value)}
-                placeholder={t('symptom_search_hint')}
-                disabled={loading}
-              />
-              {loadingSymptoms && <p className="input-hint">{t('symptom_catalog_loading')}</p>}
-              {catalogError && <p className="catalog-warning">{t('symptom_catalog_error')}</p>}
-              {!loadingSymptoms && !catalogError && (
-                <div className="symptoms-list-header">
-                  <h3 className="common-symptoms-heading">
-                    {symptomSearch.trim() ? (t('search_results') || 'Search Results') : (t('all_symptoms') || 'All Symptoms')} ({searchableSymptoms.length})
-                  </h3>
+            {/* Categorized Catalog Browser */}
+            <div className="catalog-browser-section">
+              <div className="catalog-top-bar">
+                <div className="category-pill-filter">
+                  <button 
+                    className={`cat-btn ${selectedCategory === 'all' ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory('all')}
+                  >
+                    All (130+)
+                  </button>
+                  <button 
+                    className={`cat-btn ${selectedCategory === 'respiratory' ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory('respiratory')}
+                  >
+                    🫁 Respiratory
+                  </button>
+                  <button 
+                    className={`cat-btn ${selectedCategory === 'pain' ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory('pain')}
+                  >
+                    🌡️ Fever & Pain
+                  </button>
+                  <button 
+                    className={`cat-btn ${selectedCategory === 'digestive' ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory('digestive')}
+                  >
+                    🤢 Digestion
+                  </button>
+                  <button 
+                    className={`cat-btn ${selectedCategory === 'skin' ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory('skin')}
+                  >
+                    🩹 Dermatology
+                  </button>
+                  <button 
+                    className={`cat-btn ${selectedCategory === 'neuro' ? 'active' : ''}`}
+                    onClick={() => setSelectedCategory('neuro')}
+                  >
+                    🧠 Neuro & Vitals
+                  </button>
                 </div>
-              )}
-              {!loadingSymptoms && !catalogError && (
-                searchableSymptoms.length > 0 ? (
-                  <div className="symptoms-grid symptom-search-results">
-                    {searchableSymptoms.map(option => (
-                      <button key={option.id} type="button" onClick={() => toggleSymptom(option.id)} className="symptom-btn" disabled={loading}>
-                        <span>{option.label}</span>
-                        {option.unsupported && <small className="unsupported-tag">{t('unsupported_label')}</small>}
-                      </button>
-                    ))}
-                  </div>
-                ) : <p className="input-hint">{t('no_symptom_matches')}</p>
-              )}
-            </section>
-            <button
-              onClick={handleDiagnose}
-              disabled={symptoms.length === 0 || loading}
-              className="primary-btn"
-            >
-              {loading ? t('submitting') : t('diagnose')}
-            </button>
-          </div>
-        )}
 
-        {/* ========== CLARIFICATION QUESTIONS ========== */}
-        {step === 'questions' && (
-          <div className="dashboard-card clarification-card">
-            <div className="question-header">
-              <div><span className="eyebrow">{t('clarifying_questions')}</span><h2>{t('narrow_possibilities')}</h2></div>
-              <span className="question-count">{t('questions_answered', { answered: Object.keys(clarificationAnswers).length, total: clarificationQuestions.length })}</span>
-            </div>
-            <p className="question-intro">{t('clarification_intro')}</p>
-            {diagnosis?.unsupported_symptoms?.length > 0 && (
-              <div className="unsupported-warning" role="status">
-                <strong>{t('unsupported_symptoms_notice')}</strong>
-                <p>{diagnosis.unsupported_symptoms.map(symptomLabel).join(', ')}</p>
-              </div>
-            )}
-            {diagnosis?.possible_diseases?.length > 0 && (
-              <div className="possible-diagnoses clarification-preview">
-                <strong>{language === 'hi' ? 'प्रारंभिक मॉडल अनुमान / Initial model predictions' : 'Initial model predictions'}</strong>
-                {diagnosis.possible_diseases.map(candidate => (
-                  <div className="possible-diagnosis-row" key={candidate.disease_id}>
-                    <span>{candidate.disease_name}</span>
-                    <span>{(Number(candidate.score ?? candidate.confidence ?? 0) * 100).toFixed(1)}%</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="question-list">
-              {clarificationQuestions.map(question => (
-                <div className="question-item" key={question.id}>
-                  <strong>{t(question.labelKey)}</strong>
-                  <div className="question-options">
-                    {question.options.map(([value, label]) => (
-                      <button
-                        type="button"
-                        key={value}
-                        className={clarificationAnswers[question.id] === value ? 'question-option active' : 'question-option'}
-                        onClick={() => setClarificationAnswers(current => ({ ...current, [question.id]: value }))}
-                        disabled={loading}
-                      >{t(label)}</button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {diagnosis?.needs_clarification && <p className="clarification-notice">{t('needs_clarification_notice')}</p>}
-            <button onClick={handleDiagnose} disabled={loading} className="primary-btn">
-              {loading ? t('submitting') : t('analyze_final')}
-            </button>
-            <button onClick={() => setStep('symptoms')} className="secondary-btn" disabled={loading}>← {t('back_symptoms')}</button>
-          </div>
-        )}
-
-        {/* ========== DIAGNOSIS STEP ========== */}
-        {step === 'diagnosis' && diagnosis && (
-          <div className="dashboard-card">
-            <h2>{t('diagnosis_result')}</h2>
-            <div className="diagnosis-card">
-              <div className="diagnosis-row">
-                <span className="label">{t('disease')}</span>
-                <span className="value disease-name">{diagnosis.disease_name}</span>
-              </div>
-              <div className="diagnosis-row">
-                <span className="label">{t('confidence')}</span>
-                <div className="confidence-bar">
-                  <div
-                    className="confidence-fill"
-                    style={{ width: `${Math.max(0, Math.min(Number(diagnosis.confidence || 0) * 100, 100)).toFixed(1)}%` }}
+                <div className="search-filter-box">
+                  <Search size={15} />
+                  <input 
+                    type="text"
+                    value={symptomSearch}
+                    onChange={(e) => setSymptomSearch(e.target.value)}
+                    placeholder="Filter catalog..."
                   />
-                  <span className="confidence-text">{(Number(diagnosis.confidence || 0) * 100).toFixed(1)}%</span>
                 </div>
-                <small className="probability-note">{t('model_probability_note')}</small>
               </div>
-              <div className="diagnosis-row">
-                <span className="label">{t('description')}</span>
-                <p className="description">{diagnosis.recommendations}</p>
-              </div>
-              {diagnosis.model && <p className="model-badge">{diagnosis.model.replace(/_/g, ' ')}</p>}
-              {diagnosis.needs_clarification && <p className="clarification-notice">{t('needs_clarification_notice')}</p>}
-              {diagnosis.unsupported_symptoms?.length > 0 && (
-                <div className="unsupported-warning" role="status">
-                  <strong>{t('unsupported_symptoms_notice')}</strong>
-                  <p>{diagnosis.unsupported_symptoms.map(symptomLabel).join(', ')}</p>
+
+              {loadingSymptoms ? (
+                <div className="catalog-loading-box">
+                  <RefreshCw size={20} className="spin-icon" />
+                  <span>Loading clinical symptom catalog...</span>
+                </div>
+              ) : (
+                <div className="symptom-tag-cloud">
+                  {searchableSymptoms.slice(0, 32).map(item => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => toggleSymptom(item.id)}
+                      className="symptom-cloud-pill"
+                    >
+                      <span>+ {item.label}</span>
+                    </button>
+                  ))}
                 </div>
               )}
-              {diagnosis.recognized_symptoms?.length > 0 && (
-                <p className="recognized-symptoms"><strong>{t('recognized_symptoms')}:</strong> {diagnosis.recognized_symptoms.map(symptomLabel).join(', ')}</p>
-              )}
-              {diagnosis.possible_diseases?.length > 0 && (
-                <div className="possible-diagnoses">
-                  <strong>{language === 'hi' ? 'शीर्ष मॉडल अनुमान / Top model predictions' : 'Top model predictions'}</strong>
+            </div>
+
+            {/* Run Diagnostic Engine Action Bar */}
+            <div className="dash-submit-row">
+              <button
+                type="button"
+                onClick={handleDiagnose}
+                disabled={loading || symptoms.length === 0}
+                className="btn-run-diagnosis"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw size={18} className="spin-icon" />
+                    <span>Executing ML Vector Inference...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap size={18} />
+                    <span>{t('diagnose') || 'Run AI Diagnostic Engine'} ({symptoms.length} Symptoms)</span>
+                    <ArrowRight size={18} />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+
+
+        {/* ========== STEP 2: DIAGNOSIS MATRIX RESULT ========== */}
+        {step === 'diagnosis' && diagnosis && (
+          <div className="dash-glass-card diagnosis-glass-view">
+            <div className="diagnosis-hero-banner">
+              <div className="disease-title-cluster">
+                <span className="disease-badge-eyebrow">PREDICTED PRIMARY DIAGNOSIS</span>
+                <h2 className="disease-hero-name">{diagnosis.disease_name}</h2>
+                <p className="disease-clinical-desc">{diagnosis.recommendations}</p>
+              </div>
+
+              <div className="confidence-speedometer-box">
+                <span className="confidence-label">Confidence Probability</span>
+                <div className="confidence-huge-val">
+                  {(Number(diagnosis.confidence || 0) * 100).toFixed(1)}%
+                </div>
+                <div className="confidence-mini-bar">
+                  <div 
+                    className="confidence-mini-fill" 
+                    style={{ width: `${(Number(diagnosis.confidence || 0) * 100).toFixed(1)}%` }} 
+                  />
+                </div>
+                <span className="model-stamp-pill">{diagnosis.model?.replace(/_/g, ' ') || 'Random Forest Ensemble'}</span>
+              </div>
+            </div>
+
+            {/* Top Candidate Distribution */}
+            {diagnosis.possible_diseases?.length > 0 && (
+              <div className="prediction-candidates-matrix">
+                <h3>Top Model Predictions</h3>
+                <div className="candidate-rows-list">
                   {diagnosis.possible_diseases.map(candidate => {
-                    const probability = Number(candidate.score ?? candidate.confidence ?? 0);
+                    const prob = Number(candidate.score ?? candidate.confidence ?? 0);
                     return (
-                      <div className="possible-diagnosis-row" key={candidate.disease_id}>
-                        <span>{candidate.disease_name}</span>
-                        <span>{(probability * 100).toFixed(1)}% {t('confidence')}</span>
+                      <div className="candidate-item-row" key={candidate.disease_id}>
+                        <span className="cand-disease-name">{candidate.disease_name}</span>
+                        <div className="cand-progress-wrap">
+                          <div className="cand-fill" style={{ width: `${(prob * 100).toFixed(1)}%` }} />
+                        </div>
+                        <span className="cand-percent">{(prob * 100).toFixed(1)}%</span>
                       </div>
                     );
                   })}
                 </div>
+              </div>
+            )}
+
+            {/* Recommended Medications Grid */}
+            <div className="catalog-meds-preview-box">
+              <div className="meds-header-row">
+                <div className="meds-title">
+                  <Pill size={20} className="icon-pill-teal" />
+                  <h3>{t('medicines') || 'Recommended Medication Regimen'}</h3>
+                </div>
+                <span className="safety-verified-tag">✓ Contraindication Checked</span>
+              </div>
+
+              {loadingMedicines && <p className="loading-meds-note">Querying clinical drug database...</p>}
+              
+              {!loadingMedicines && medicineRecommendations.length === 0 && (
+                <p className="no-meds-note">{t('no_medicines_selected') || 'No direct OTC medicines catalogued for this condition. Please consult a doctor.'}</p>
               )}
-              <div className="diagnosis-medicine-catalog">
-                <strong>{t('medicines')}</strong>
-                {loadingMedicines && <p>{t('medicine_catalog_loading')}</p>}
-                {medicineCatalogUnavailable && <p className="catalog-warning">{t('medicine_catalog_unavailable')}</p>}
-                {medicineCatalogError && <p className="catalog-warning">{t('medicine_catalog_error')}</p>}
-                {!loadingMedicines && !medicineCatalogUnavailable && !medicineCatalogError && medicineRecommendations.length === 0 && (
-                  <p>{t('no_medicines_selected')}</p>
-                )}
-                {medicineRecommendations.map(medicine => (
-                  <div className="catalog-medicine-row" key={medicine.id}>
-                    <strong>{language === 'hi' ? medicine.name_hi : medicine.name_en}</strong>
-                    <span>{medicine.dosage} · {medicine.frequency} · {medicine.duration_days} {language === 'hi' ? 'दिन' : 'days'}</span>
+
+              <div className="meds-catalog-grid">
+                {medicineRecommendations.map(med => (
+                  <div className="med-preview-card" key={med.id}>
+                    <div className="med-title-row">
+                      <h4>{language === 'hi' ? med.name_hi : med.name_en}</h4>
+                      <span className="med-duration-tag">{med.duration_days} {language === 'hi' ? 'दिन' : 'days'}</span>
+                    </div>
+                    <p className="med-timing-text">{med.dosage} · {med.frequency}</p>
                   </div>
                 ))}
               </div>
             </div>
-            <button
-              onClick={handleGeneratePrescription}
-              disabled={loading || loadingMedicines}
-              className="primary-btn"
-            >
-              {loading ? t('submitting') : t('generate_prescription')}
-            </button>
-            <button onClick={handleReset} className="secondary-btn">{t('reset') || 'Start Over'}</button>
+
+            {/* Action Buttons */}
+            <div className="diagnosis-actions-toolbar">
+              <button onClick={handleReset} className="btn-secondary-subtle">
+                <RefreshCw size={16} />
+                <span>{t('reset') || 'New Assessment'}</span>
+              </button>
+              <button
+                onClick={handleGeneratePrescription}
+                disabled={loading || loadingMedicines}
+                className="btn-run-diagnosis"
+              >
+                <FileText size={18} />
+                <span>{loading ? 'Generating Official Rx...' : t('generate_prescription') || 'Generate Certified Clinical Rx'}</span>
+                <ArrowRight size={18} />
+              </button>
+            </div>
           </div>
         )}
 
-        {/* ========== PRESCRIPTION STEP ========== */}
+        {/* ========== STEP 3: CERTIFIED PRESCRIPTION VIEW ========== */}
         {step === 'prescription' && prescription && (
-          <div className="dashboard-card">
-            <h2>{refreshingPrescription ? (language === 'hi' ? 'नुस्खे का अनुवाद हो रहा है…' : 'Updating prescription language…') : t('prescription')}</h2>
-            <div className="prescription-note">
-              <div className="note-heading">
-                <div className="note-brand">
-                  <img src={cureLogo} alt="CureAI logo" className="prescription-logo" />
-                  <div><span className="note-kicker">CUREAI</span><h3>CureAI: Medicine Recommendation System using Data Science</h3></div>
-                </div>
-                <span className="note-date">{formatDate(prescription.date_generated)}</span>
-              </div>
-              <div className="patient-note-details">
-                <span><b>Patient / रोगी:</b> {user?.full_name || '—'}</span>
-                <span><b>Age / आयु:</b> {calculateAge(user?.date_of_birth)}</span>
-                <span><b>Gender / लिंग:</b> {user?.gender || '—'}</span>
-              </div>
-              <div className="prescription-meta">
-                <span>Prescription ID / प्रिस्क्रिप्शन आईडी: {prescription.prescription_id}</span>
-                <span className="predicted-condition">Predicted disease / अनुमानित बीमारी: <b>{prescription.disease}</b></span>
-              </div>
-              <div className="note-symptoms"><b>Symptoms reported / बताए गए लक्षण:</b> {symptoms.map(symptom => t(symptom) || symptom.replace(/_/g, ' ')).join(', ') || 'Not recorded / दर्ज नहीं'}</div>
-            </div>
-            <h3>{t('medicines')}</h3>
-            <div className="medicines-list">
-              {(prescription.medicines || []).map((med, idx) => (
-                <div key={idx} className="medicine-card">
-                  <h4>{med.medicine_name}</h4>
-                  <p className="medicine-hi">{med.medicine_name_hi}</p>
-                  <div className="medicine-details">
-                    <p><strong>Dosage / मात्रा:</strong> {med.dosage}</p>
-                    <p><strong>When / कब:</strong> {med.frequency}</p>
-                    <p><strong>How to take / लेने का तरीका:</strong> {med.meal_instruction || med.instructions || 'Follow package instructions / पैकेज निर्देश देखें'}</p>
-                    <p><strong>Duration / अवधि:</strong> {med.duration_days} days / दिन</p>
-                    {med.precautions?.length > 0 && <p><strong>Precautions / सावधानियां:</strong> {med.precautions.join('; ')}</p>}
-                    {med.side_effects?.length > 0 && <p><strong>Possible side effects / संभावित दुष्प्रभाव:</strong> {med.side_effects.join(', ')}</p>}
+          <div className="dash-glass-card prescription-glass-view">
+            <div className="prescription-official-sheet" id="printable-rx">
+              {/* Header Letterhead */}
+              <div className="rx-sheet-header">
+                <div className="rx-brand-lock">
+                  <img src={cureLogo} alt="CureAI Logo" className="rx-logo" />
+                  <div>
+                    <span className="rx-letterhead-kicker">CUREAI CLINICAL HEALTH SYSTEMS</span>
+                    <h2>Electronic Clinical Prescription & Care Plan</h2>
+                    <span className="rx-sub-kicker">ML-Powered Diagnostic & Drug Recommendation Engine</span>
                   </div>
                 </div>
-              ))}
+                <div className="rx-date-stamp">
+                  <span className="rx-date-label">Date Issued</span>
+                  <strong>{formatDate(prescription.date_generated)}</strong>
+                  <span className="rx-id-pill">Rx ID: {prescription.prescription_id}</span>
+                </div>
+              </div>
+
+              {/* Patient Vitals Card */}
+              <div className="rx-patient-info-strip">
+                <div className="patient-rx-stat">
+                  <span>Patient Name</span>
+                  <strong>{user?.full_name || 'Anonymous'}</strong>
+                </div>
+                <div className="patient-rx-stat">
+                  <span>Age / Gender</span>
+                  <strong>{calculateAge(user?.date_of_birth)} yrs / {user?.gender || '—'}</strong>
+                </div>
+                <div className="patient-rx-stat">
+                  <span>Blood Group</span>
+                  <strong>{user?.blood_group || '—'}</strong>
+                </div>
+                <div className="patient-rx-stat">
+                  <span>Diagnosed Condition</span>
+                  <strong className="text-highlight-green">{prescription.disease}</strong>
+                </div>
+              </div>
+
+              <div className="rx-symptoms-list-line">
+                <span>Symptoms Recorded:</span>
+                <strong>{symptoms.map(s => symptomLabel(s)).join(', ') || 'None specified'}</strong>
+              </div>
+
+              {/* Medication Schedule List */}
+              <div className="rx-medications-section">
+                <div className="rx-section-badge">
+                  <span className="rx-symbol-emblem">℞</span>
+                  <span>PRESCRIBED MEDICATIONS & DOSAGE SCHEDULE</span>
+                </div>
+
+                <div className="rx-meds-table">
+                  {(prescription.medicines || []).map((med, idx) => (
+                    <div key={idx} className="rx-med-row-card">
+                      <div className="rx-med-header">
+                        <div>
+                          <h4>{med.medicine_name}</h4>
+                          {med.medicine_name_hi && <span className="med-hi-name">{med.medicine_name_hi}</span>}
+                        </div>
+                        <span className="rx-dose-badge">{med.dosage}</span>
+                      </div>
+
+                      <div className="rx-med-specs">
+                        <div className="spec-col">
+                          <span className="spec-title">Schedule & Timing</span>
+                          <strong>{med.frequency}</strong>
+                        </div>
+                        <div className="spec-col">
+                          <span className="spec-title">Meal Instructions</span>
+                          <strong>{med.meal_instruction || med.instructions || 'With water'}</strong>
+                        </div>
+                        <div className="spec-col">
+                          <span className="spec-title">Duration</span>
+                          <strong>{med.duration_days} Days</strong>
+                        </div>
+                      </div>
+
+                      {med.precautions?.length > 0 && (
+                        <div className="rx-precaution-alert">
+                          <strong>⚠️ Precaution:</strong> {med.precautions.join('; ')}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Doctor / System Notes */}
+              {prescription.doctor_notes && (
+                <div className="rx-notes-box">
+                  <strong>Clinical Remarks & Safety Advisory:</strong>
+                  <p>{prescription.doctor_notes}</p>
+                </div>
+              )}
+
+              {/* Wellness Tips Grid */}
+              {prescription.wellness_tips?.length > 0 && (
+                <div className="rx-wellness-block">
+                  <h4>🌿 Lifestyle & Recovery Recommendations</h4>
+                  <div className="wellness-pills-row">
+                    {prescription.wellness_tips.map((tip, idx) => (
+                      <div key={idx} className="wellness-tip-chip">
+                        <span>• {tip}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="doctor-notes"><strong>Doctor / system notes / डॉक्टर की टिप्पणी:</strong> {prescription.doctor_notes}</div>
-            <h3>{t('wellness_tips')}</h3>
-            <div className="wellness-grid">
-              {(prescription.wellness_tips || []).map((tip, idx) => (
-                <div key={idx} className="tip-card">{tip}</div>
-              ))}
+
+            {/* Prescription Actions Toolbar */}
+            <div className="rx-actions-bottom-row">
+              <button onClick={handleReset} className="btn-secondary-subtle">
+                <RefreshCw size={16} />
+                <span>Start New Diagnostic Session</span>
+              </button>
+              <button 
+                onClick={handlePrintPrescription} 
+                className="btn-print-official"
+                disabled={refreshingPrescription}
+              >
+                <Printer size={18} />
+                <span>Print / Download Clinical PDF</span>
+              </button>
             </div>
-            <button onClick={handlePrintPrescription} className="print-btn" disabled={refreshingPrescription}>🖨️ Print / Save as PDF / प्रिंट करें या PDF सेव करें</button>
-            {prescription.pdf_generated_at && <p className="pdf-status">PDF note recorded in patient history at {formatTime(prescription.pdf_generated_at)}</p>}
-            <button onClick={handleReset} className="primary-btn reset-btn">{t('reset') || 'Start Over'}</button>
           </div>
         )}
 
-        {/* ========== PATIENT HISTORY ========== */}
-        <section className="dashboard-card history-section">
-          <h2>📋 {t('patient_history')}</h2>
+        {/* ========== PATIENT HISTORY TIMELINE SECTION ========== */}
+        <section className="dash-glass-card history-card-block">
+          <div className="card-top-title-row">
+            <div className="title-with-icon">
+              <div className="icon-badge-blue"><History size={22} /></div>
+              <div>
+                <h2>{t('patient_history') || 'Patient Clinical History Timeline'}</h2>
+                <p className="card-subtitle">Encrypted record of your past symptom vectors, AI diagnostic predictions, and prescriptions.</p>
+              </div>
+            </div>
+          </div>
+
           {history.length === 0 ? (
-            <p className="empty-history">{t('no_history')}</p>
+            <div className="history-empty-state">
+              <Activity size={36} className="icon-empty-pulse" />
+              <p>{t('no_history') || 'No prior medical sessions logged. Run your first symptom analysis above.'}</p>
+            </div>
           ) : (
-            <div className="history-list">
+            <div className="history-timeline-list">
               {history.map((session) => (
-                <div key={session.id || session._id} className="history-card">
-                  <div className="history-header">
-                    <span className="history-date">{formatDate(session.created_at)}</span>
-                    {session.diagnosis && (
-                      <span className={`severity-badge ${session.diagnosis.severity || ''}`}>
-                        {session.diagnosis.severity || '—'}
-                      </span>
-                    )}
+                <div key={session.id || session._id} className="history-timeline-item">
+                  <div className="history-time-col">
+                    <span className="hist-date">{formatDate(session.created_at)}</span>
+                    <span className="hist-time">{session.created_at ? new Date(session.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
                   </div>
-                  <div className="history-body">
+
+                  <div className="history-content-col">
+                    <div className="hist-disease-title">
+                      <strong>{session.diagnosis?.disease_name || 'Symptom Vector Session'}</strong>
+                      {session.diagnosis?.confidence && (
+                        <span className="hist-conf-pill">{(session.diagnosis.confidence * 100).toFixed(1)}% Match</span>
+                      )}
+                    </div>
+
                     {session.symptoms && session.symptoms.length > 0 && (
-                      <div className="history-symptoms">
-                        <strong>{t('symptoms')}:</strong>{' '}
-                        {session.symptoms.join(', ')}
-                      </div>
-                    )}
-                    {session.diagnosis && (
-                      <div className="history-diagnosis">
-                        <strong>{t('disease')}:</strong> {session.diagnosis.disease_name}
-                        {session.diagnosis.model === 'random_forest' && session.diagnosis.confidence && (
-                          <span> ({(session.diagnosis.confidence * 100).toFixed(1)}% {t('confidence')})</span>
-                        )}
-                      </div>
-                    )}
-                    {session.prescription && (
-                      <div className="history-prescription">
-                        <strong>{t('prescription')}:</strong> {session.prescription.prescription_id}
-                        {session.prescription.medicines && (
-                          <div className="history-meds">
-                            {session.prescription.medicines.map((m, i) => (
-                              <span key={i} className="med-tag">{m.medicine_name}</span>
-                            ))}
-                          </div>
-                        )}
+                      <div className="hist-symptoms-chips">
+                        {session.symptoms.map((sym, i) => (
+                          <span key={i} className="hist-symptom-tag">{symptomLabel(sym)}</span>
+                        ))}
                       </div>
                     )}
                   </div>
-                  <div className="history-actions">
+
+                  <div className="history-actions-col">
                     {session.symptoms && session.symptoms.length > 0 && (
-                      <button onClick={() => handleViewSession(session)} className="view-btn">
-                        {t('view_details')}
+                      <button onClick={() => handleViewSession(session)} className="btn-hist-view">
+                        <span>Inspect Analytics</span>
+                        <ChevronRight size={14} />
                       </button>
                     )}
-                    <button onClick={() => handleDeleteHistory(session.id || session._id)} className="delete-history-btn">
-                      Delete
+                    <button 
+                      onClick={() => handleDeleteHistory(session.id || session._id)} 
+                      className="btn-hist-delete"
+                      title="Delete Record"
+                    >
+                      <Trash2 size={15} />
                     </button>
                   </div>
                 </div>

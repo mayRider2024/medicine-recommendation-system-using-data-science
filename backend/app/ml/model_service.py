@@ -17,26 +17,41 @@ CLASSES: List[str] = _artifact["classes"]
 # Keep this mapping explicit so the frontend vocabulary can remain stable.
 SYMPTOM_ALIASES: Dict[str, List[str]] = {
     "fever": ["mild_fever"],
+    "mild_fever": ["mild_fever"],
     "high_fever": ["high_fever"],
     "cough": ["cough"],
     "sore_throat": ["throat_irritation"],
+    "throat_irritation": ["throat_irritation"],
     "body_ache": ["muscle_pain"],
+    "muscle_pain": ["muscle_pain"],
     "runny_nose": ["runny_nose"],
     "headache": ["headache"],
     "fatigue": ["fatigue"],
+    "exhaustion": ["fatigue"],
+    "tiredness": ["fatigue"],
+    "weakness": ["fatigue"],
     "sneezing": ["continuous_sneezing"],
+    "continuous_sneezing": ["continuous_sneezing"],
     "nausea": ["nausea"],
     "dizziness": ["dizziness"],
     "chills": ["chills"],
     "chest_pain": ["chest_pain"],
     "shortness_of_breath": ["breathlessness"],
+    "breathlessness": ["breathlessness"],
     "loss_of_smell": ["loss_of_smell"],
+    "loss_of_taste": ["loss_of_smell"],
     "diarrhea": ["diarrhoea"],
+    "diarrhoea": ["diarrhoea"],
     "constipation": ["constipation"],
     "abdominal_pain": ["abdominal_pain"],
+    "stomach_pain": ["abdominal_pain"],
+    "belly_pain": ["abdominal_pain"],
     "back_pain": ["back_pain"],
     "joint_pain": ["joint_pain"],
     "rash": ["skin_rash"],
+    "skin_rash": ["skin_rash"],
+    "weird_rash": ["skin_rash"],
+    "strange_rash": ["skin_rash"],
     "sweating": ["sweating"],
     "insomnia": [],  # no matching feature in the 132-feature dataset
 }
@@ -82,8 +97,6 @@ def predict_disease(symptoms: List[str], answers: Dict[str, str] | None = None, 
 
     top_probability = float(ranked[0][1])
     # This is model probability, not a clinically calibrated confidence score.
-    needs_clarification = len(recognized) < 3 or top_probability < 0.55
-
     return {
         "disease": ranked[0][0],
         "probability": top_probability,
@@ -93,7 +106,7 @@ def predict_disease(symptoms: List[str], answers: Dict[str, str] | None = None, 
         ],
         "recognized_symptoms": recognized,
         "unsupported_symptoms": unsupported,
-        "needs_clarification": needs_clarification,
+        "needs_clarification": False,
         "feature_count": int(sum(X.iloc[0].values)),
     }
 

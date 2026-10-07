@@ -1,25 +1,25 @@
 import { transcriptionAPI } from './api';
 
-// Enhanced symptom mappings with variations and synonyms
+// Enhanced symptom mappings with variations, slangs, prefixes, and synonyms
 const symptomMappings = {
   fever: {
-    keywords: ['fever', 'बुखार', 'high temperature', 'temperature', 'temp', 'hot body', 'feeling hot', 'burning up'],
-    patterns: [/\b(fever|temperature|temp)\b/i, /\bhigh\s+temp/i, /\bfeeling\s+hot/i, /\bburning\s+up/i]
+    keywords: ['fever', 'बुखार', 'high temperature', 'temperature', 'temp', 'hot body', 'feeling hot', 'burning up', 'feverish'],
+    patterns: [/\b(fever|temperature|temp|feverish)\b/i, /\bhigh\s+temp/i, /\bfeeling\s+hot/i, /\bburning\s+up/i]
   },
   cough: {
     keywords: ['cough', 'खांसी', 'coughing', 'continuous cough', 'dry cough', 'wet cough', 'hacking cough'],
     patterns: [/\bcough(ing)?\b/i, /\bkhans[iy]/i]
   },
   sore_throat: {
-    keywords: ['sore throat', 'गले में खराश', 'throat pain', 'throat ache', 'pain in throat', 'throat hurts', 'hurting throat', 'throat is paining'],
-    patterns: [/\b(sore|pain|ache|hurt|paining)\s+(in\s+)?(my\s+)?throat/i, /\bthroat\s+(pain|ache|hurt|is\s+paining|paining)/i]
+    keywords: ['sore throat', 'गले में खराश', 'throat pain', 'throat ache', 'pain in throat', 'throat hurts', 'hurting throat', 'throat is paining', 'throat irritation'],
+    patterns: [/\b(sore|pain|ache|hurt|paining|irritat\w*)\s+(in\s+)?(my\s+)?throat/i, /\bthroat\s+(pain|ache|hurt|is\s+paining|paining|irritat\w*)/i]
   },
   body_ache: {
-    keywords: ['body ache', 'शरीर में दर्द', 'body pain', 'muscle pain', 'muscles hurt', 'body hurts', 'aching body', 'pain in body', 'body is paining'],
-    patterns: [/\b(body|muscle)\s+(ache|pain|hurt|paining)/i, /\b(ache|pain|hurt|paining)\s+(in\s+)?(my\s+)?(body|muscles?)/i, /\b(body|muscles?)\s+(is\s+)?(paining|hurting)/i]
+    keywords: ['body ache', 'शरीर में दर्द', 'body pain', 'muscle pain', 'muscles hurt', 'body hurts', 'aching body', 'pain in body', 'body is paining', 'aches and pains'],
+    patterns: [/\b(body|muscle)\s+(ache|pain|hurt|paining|sore)/i, /\b(ache|pain|hurt|paining)\s+(in\s+)?(my\s+)?(body|muscles?)/i, /\b(body|muscles?)\s+(is\s+)?(paining|hurting)/i]
   },
   runny_nose: {
-    keywords: ['runny nose', 'बहती नाक', 'running nose', 'nose running', 'nasal discharge', 'blocked nose', 'stuffy nose', 'congested nose', 'nose is blocked'],
+    keywords: ['runny nose', 'बहती नाक', 'running nose', 'nose running', 'nasal discharge', 'blocked nose', 'stuffy nose', 'congested nose', 'nose is blocked', 'nasal congestion'],
     patterns: [/\b(runny|running|blocked|stuffy|congested)\s+nose/i, /\bnose\s+(running|runny|blocked|stuffy|is\s+blocked|is\s+running)/i]
   },
   headache: {
@@ -27,32 +27,32 @@ const symptomMappings = {
     patterns: [/\bhead\s*ache/i, /\b(pain|ache|hurt|paining)\s+(in\s+)?(my\s+)?head/i, /\bhead\s+(pain|hurt|is\s+paining|paining)/i, /\bmigraine/i, /\b(my\s+)?head\s+is\s+paining/i]
   },
   fatigue: {
-    keywords: ['fatigue', 'थकान', 'tired', 'weakness', 'feeling weak', 'no energy', 'exhausted', 'exhaustion', 'tiredness', 'lethargic', 'drowsy'],
-    patterns: [/\b(fatigue|tired|weak|exhausted|lethargic|drowsy)/i, /\bno\s+energy/i, /\bfeeling\s+(weak|tired)/i]
+    keywords: ['fatigue', 'थकान', 'tired', 'weakness', 'feeling weak', 'no energy', 'exhausted', 'exhaustion', 'tiredness', 'lethargic', 'drowsy', 'extreme tiredness', 'feeling drained'],
+    patterns: [/\b(fatigue|tired|weak|exhausted|exhaustion|lethargic|drowsy|drained)/i, /\bno\s+energy/i, /\bfeeling\s+(weak|tired|drained)/i]
   },
   sneezing: {
     keywords: ['sneezing', 'छींक', 'sneeze', 'continuous sneezing', 'frequent sneezing'],
     patterns: [/\bsneez(e|ing)/i]
   },
   nausea: {
-    keywords: ['nausea', 'मतली', 'feeling sick', 'vomiting', 'throw up', 'throwing up', 'feel like vomiting', 'want to vomit'],
-    patterns: [/\b(nausea|vomit(ing)?|throwing\s+up|throw\s+up)/i, /\bfeel(ing)?\s+(sick|like\s+vomiting)/i]
+    keywords: ['nausea', 'मतली', 'feeling sick', 'vomiting', 'throw up', 'throwing up', 'feel like vomiting', 'want to vomit', 'queasy'],
+    patterns: [/\b(nausea|vomit(ing)?|throwing\s+up|throw\s+up|queasy)/i, /\bfeel(ing)?\s+(sick|like\s+vomiting)/i]
   },
   dizziness: {
     keywords: ['dizziness', 'चक्कर', 'dizzy', 'lightheaded', 'vertigo', 'spinning', 'feeling dizzy'],
     patterns: [/\b(dizz(y|iness)|lightheaded|vertigo|spinning)/i, /\bfeeling\s+dizzy/i]
   },
   chills: {
-    keywords: ['chills', 'ठंड लगना', 'shivering', 'shaking', 'cold sweats', 'feeling cold'],
-    patterns: [/\b(chills?|shiver(ing)?|shaking|cold\s+sweats?)/i, /\bfeeling\s+cold/i]
+    keywords: ['chills', 'ठंड लगना', 'shivering', 'shaking', 'cold sweats', 'feeling cold', 'rigors'],
+    patterns: [/\b(chills?|shiver(ing)?|shaking|cold\s+sweats?|rigors?)/i, /\bfeeling\s+cold/i]
   },
   chest_pain: {
-    keywords: ['chest pain', 'सीने में दर्द', 'pain in chest', 'chest hurts', 'chest ache', 'chest is paining'],
-    patterns: [/\b(pain|ache|hurt|paining)\s+(in\s+)?(my\s+)?chest/i, /\bchest\s+(pain|ache|hurt|is\s+paining|paining)/i]
+    keywords: ['chest pain', 'सीने में दर्द', 'pain in chest', 'chest hurts', 'chest ache', 'chest is paining', 'chest tightness'],
+    patterns: [/\b(pain|ache|hurt|paining|tightness)\s+(in\s+)?(my\s+)?chest/i, /\bchest\s+(pain|ache|hurt|is\s+paining|paining|tightness)/i]
   },
   shortness_of_breath: {
-    keywords: ['shortness of breath', 'सांस की तकलीफ', 'breathing difficulty', 'difficulty breathing', 'cant breathe', 'hard to breathe', 'breathless'],
-    patterns: [/\bshortness\s+of\s+breath/i, /\b(breathing\s+difficulty|difficulty\s+breathing)/i, /\b(cant|cannot|can't)\s+breathe/i, /\bhard\s+to\s+breathe/i, /\bbreathless/i]
+    keywords: ['shortness of breath', 'सांस की तकलीफ', 'breathing difficulty', 'difficulty breathing', 'cant breathe', 'hard to breathe', 'breathless', 'breathlessness'],
+    patterns: [/\bshortness\s+of\s+breath/i, /\b(breathing\s+difficulty|difficulty\s+breathing)/i, /\b(cant|cannot|can't)\s+breathe/i, /\bhard\s+to\s+breathe/i, /\bbreathless(ness)?/i]
   },
   loss_of_taste: {
     keywords: ['loss of taste', 'स्वाद की कमी', 'cant taste', 'no taste', 'taste loss'],
@@ -63,36 +63,36 @@ const symptomMappings = {
     patterns: [/\bloss\s+of\s+smell/i, /\b(cant|cannot|can't)\s+smell/i, /\bno\s+smell/i]
   },
   diarrhea: {
-    keywords: ['diarrhea', 'दस्त', 'loose motions', 'stomach upset', 'upset stomach'],
-    patterns: [/\b(diarr[hoe]ea|loose\s+motions?|stomach\s+upset|upset\s+stomach)/i]
+    keywords: ['diarrhea', 'दस्त', 'loose motions', 'stomach upset', 'upset stomach', 'watery stool'],
+    patterns: [/\b(diarr[hoe]ea|loose\s+motions?|stomach\s+upset|upset\s+stomach|watery\s+stool)/i]
   },
   constipation: {
     keywords: ['constipation', 'कब्ज़', 'cant pass stool', 'difficulty in passing stool'],
     patterns: [/\bconstipation/i, /\b(cant|cannot|can't)\s+pass\s+stool/i, /\bdifficulty\s+(in\s+)?passing\s+stool/i]
   },
   abdominal_pain: {
-    keywords: ['abdominal pain', 'पेट दर्द', 'stomach pain', 'belly pain', 'pain in stomach', 'stomach ache', 'stomach is paining'],
-    patterns: [/\b(abdominal|stomach|belly)\s+(pain|ache|hurt|paining)/i, /\b(pain|ache|hurt|paining)\s+(in\s+)?(my\s+)?(stomach|belly|abdomen)/i]
+    keywords: ['abdominal pain', 'पेट दर्द', 'stomach pain', 'belly pain', 'pain in stomach', 'stomach ache', 'stomach is paining', 'cramps in stomach'],
+    patterns: [/\b(abdominal|stomach|belly)\s+(pain|ache|hurt|paining|cramps?)/i, /\b(pain|ache|hurt|paining|cramps?)\s+(in\s+)?(my\s+)?(stomach|belly|abdomen)/i]
   },
   back_pain: {
-    keywords: ['back pain', 'पीठ दर्द', 'backache', 'pain in back', 'back hurts', 'back is paining'],
-    patterns: [/\bback\s*(pain|ache|hurt|paining)/i, /\b(pain|ache|hurt|paining)\s+(in\s+)?(my\s+)?back/i]
+    keywords: ['back pain', 'पीठ दर्द', 'backache', 'pain in back', 'back hurts', 'back is paining', 'lower back pain'],
+    patterns: [/\b(lower\s+)?back\s*(pain|ache|hurt|paining)/i, /\b(pain|ache|hurt|paining)\s+(in\s+)?(my\s+)?(lower\s+)?back/i]
   },
   joint_pain: {
-    keywords: ['joint pain', 'जोड़ों में दर्द', 'joints hurt', 'pain in joints', 'aching joints'],
-    patterns: [/\bjoint\s+(pain|ache|hurt)/i, /\b(pain|ache|hurt)\s+(in\s+)?(my\s+)?joints/i, /\bjoints\s+(hurt|aching)/i]
+    keywords: ['joint pain', 'जोड़ों में दर्द', 'joints hurt', 'pain in joints', 'aching joints', 'joint stiffness'],
+    patterns: [/\bjoint\s+(pain|ache|hurt|stiffness)/i, /\b(pain|ache|hurt)\s+(in\s+)?(my\s+)?joints/i, /\bjoints\s+(hurt|aching)/i]
   },
   rash: {
-    keywords: ['rash', 'दाने', 'skin rash', 'red spots', 'itchy skin', 'skin irritation'],
-    patterns: [/\brash/i, /\b(skin\s+)?rash/i, /\bred\s+spots/i, /\bitchy\s+skin/i]
+    keywords: ['rash', 'दाने', 'skin rash', 'red spots', 'itchy skin', 'skin irritation', 'weird rash', 'strange rash', 'red rash', 'rashes', 'skin eruption', 'bumps on skin'],
+    patterns: [/\b(\w+\s+)?rash(es)?\b/i, /\b(skin\s+)?rash(es)?/i, /\bred\s+spots/i, /\bitchy\s+skin/i, /\bskin\s+eruption/i]
   },
   sweating: {
-    keywords: ['sweating', 'पसीना', 'excessive sweating', 'night sweats', 'profuse sweating'],
-    patterns: [/\bsweat(ing|s)/i, /\b(excessive|night|profuse)\s+sweat(ing|s)/i]
+    keywords: ['sweating', 'पसीना', 'excessive sweating', 'night sweats', 'profuse sweating', 'perspiration'],
+    patterns: [/\bsweat(ing|s)?/i, /\b(excessive|night|profuse)\s+sweat(ing|s)?/i]
   },
   insomnia: {
-    keywords: ['insomnia', 'अनिद्रा', 'cant sleep', 'difficulty sleeping', 'sleepless', 'trouble sleeping'],
-    patterns: [/\binsomnia/i, /\b(cant|cannot|can't)\s+sleep/i, /\bdifficulty\s+sleeping/i, /\btrouble\s+sleeping/i]
+    keywords: ['insomnia', 'अनिद्रा', 'cant sleep', 'difficulty sleeping', 'sleepless', 'trouble sleeping', 'poor sleep', 'sleeplessness'],
+    patterns: [/\binsomnia/i, /\b(cant|cannot|can't)\s+sleep/i, /\bdifficulty\s+sleeping/i, /\btrouble\s+sleeping/i, /\bsleepless(ness)?/i]
   }
 };
 
@@ -186,10 +186,10 @@ export const voiceService = {
     if (!transcript || typeof transcript !== 'string') return [];
 
     const foundSymptoms = new Set();
-    let normalizedTranscript = transcript.toLowerCase().trim();
+    // Normalize string: replace underscores and hyphens with spaces for robust phrase matching
+    let normalizedTranscript = transcript.toLowerCase().replace(/[_-]/g, ' ').trim();
 
-    // Whisper can turn symptom words into phonetically similar words. Apply
-    // conservative corrections only to phrases that strongly indicate a symptom.
+    // Whisper corrections for voice input
     if (!strictMode) {
       normalizedTranscript = normalizedTranscript
         .replace(/\bcuff\b/g, 'cough')
@@ -347,5 +347,3 @@ export const voiceService = {
     return uniqueSymptoms;
   },
 };
-
-

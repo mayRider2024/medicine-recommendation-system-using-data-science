@@ -4,10 +4,14 @@
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 :root {
-  font-family: 'Avenir Next', 'Trebuchet MS', 'Segoe UI', sans-serif;
-  color: #173b2a;
-  background: #f3fbf5;
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #f1f5f9;
+  background: #090e17;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -16,29 +20,56 @@ body {
   min-width: 320px;
   min-height: 100vh;
   font-family: inherit;
+  background-color: #090e17;
+  color: #f1f5f9;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-button, input, textarea, select { font: inherit; }
-button { -webkit-tap-highlight-color: transparent; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(15, 157, 88, .28); outline-offset: 2px; }
-::selection { background: #b8e5c6; color: #073b21; }
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: #e8f7ed; }
-::-webkit-scrollbar-thumb { background: #83c99a; border: 3px solid #e8f7ed; border-radius: 999px; }
+button, input, textarea, select { 
+  font: inherit; 
+}
+
+button { 
+  -webkit-tap-highlight-color: transparent; 
+}
+
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { 
+  outline: 2px solid #10b981; 
+  outline-offset: 2px; 
+}
+
+::selection { 
+  background: rgba(16, 185, 129, 0.4); 
+  color: #ffffff; 
+}
+
+::-webkit-scrollbar { 
+  width: 8px; 
+  height: 8px; 
+}
+
+::-webkit-scrollbar-track { 
+  background: #090e17; 
+}
+
+::-webkit-scrollbar-thumb { 
+  background: rgba(255, 255, 255, 0.15); 
+  border-radius: 999px; 
+}
+
+::-webkit-scrollbar-thumb:hover { 
+  background: rgba(16, 185, 129, 0.5); 
+}
 
 .loading-screen {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #f2fbf5, #dff4e7);
-  color: #087f45;
-  font-weight: 800;
-  letter-spacing: .02em;
+  background: #090e17;
+  color: #34d399;
+  font-weight: 700;
+  letter-spacing: .04em;
+  font-size: 1.1rem;
 }
-
-button:hover:not(:disabled) { opacity: .94; transform: translateY(-1px); }
-button { transition: transform .18s ease, box-shadow .18s ease, background .18s ease, border-color .18s ease; }
-button:disabled { opacity: .6; cursor: not-allowed; }
