@@ -175,6 +175,30 @@
   gap: 1.25rem;
 }
 
+.btn-download-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.48rem 0.95rem;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 20px;
+  color: #38bdf8;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: all 0.2s ease;
+}
+
+.btn-download-shortcut:hover {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: #38bdf8;
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(56, 189, 248, 0.25);
+}
+
 .lang-toggle-capsule {
   display: flex;
   background: rgba(255, 255, 255, 0.06);
@@ -313,8 +337,75 @@
   display: flex;
   align-items: center;
   gap: 1.25rem;
-  margin-bottom: 4rem;
+  margin-bottom: 2.25rem;
 }
+
+/* Medical Disclaimer Banner */
+.medical-disclaimer-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 900px;
+  width: 100%;
+  margin-bottom: 2.75rem;
+  padding: 1.25rem 1.75rem;
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.08) 0%, rgba(249, 115, 22, 0.05) 100%);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: 16px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), inset 0 0 20px rgba(234, 179, 8, 0.04);
+  animation: fadeInDisclaimer 0.6s ease-out;
+}
+
+.disclaimer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(234, 179, 8, 0.15);
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  padding: 0.3rem 0.85rem;
+  border-radius: 30px;
+}
+
+.disclaimer-icon {
+  color: #facc15;
+  flex-shrink: 0;
+}
+
+.disclaimer-tag {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #fde047;
+}
+
+.disclaimer-text {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: #e2e8f0;
+  text-align: center;
+}
+
+.disclaimer-text strong {
+  color: #fef08a;
+  font-weight: 700;
+}
+
+@keyframes fadeInDisclaimer {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Floating Stats Strip */
 
 .hero-primary-btn {
   display: inline-flex;

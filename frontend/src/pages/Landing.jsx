@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
@@ -23,8 +23,11 @@ import {
   Lock,
   Clock,
   Sparkle,
-  Plus
+  Plus,
+  AlertTriangle,
+  Download
 } from 'lucide-react';
+import InstallAppModal from '../components/InstallAppModal';
 import './Landing.css';
 
 const SAMPLE_SYMPTOMS = [
@@ -87,6 +90,30 @@ function Landing() {
 
   const [activeDemoSymptoms, setActiveDemoSymptoms] = useState(['headache', 'high_fever']);
   const [openFaq, setOpenFaq] = useState(null);
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+
+  useEffect(() => {
+    const handlePrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handlePrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handlePrompt);
+  }, []);
+
+  const handleGetAppClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+        return;
+      }
+    }
+    // If prompt not available or on iOS/desktop without auto-prompt, show guide modal
+    setShowInstallModal(true);
+  };
 
   const toggleDemoSymptom = (id) => {
     setActiveDemoSymptoms(prev => 
@@ -170,6 +197,16 @@ function Landing() {
           </nav>
 
           <div className="nav-actions">
+            {/* App Shortcut / Download Button */}
+            <button 
+              onClick={handleGetAppClick} 
+              className="btn-download-shortcut"
+              title={isHindi ? "होम स्क्रीन पर जोड़ें / डाउनलोड" : "Add to Home Screen / Download App"}
+            >
+              <Download size={15} />
+              <span>{isHindi ? 'ऐप डाउनलोड' : 'Get App'}</span>
+            </button>
+
             <div className="lang-toggle-capsule">
               <button 
                 className={`lang-btn ${language === 'en' ? 'active' : ''}`}
@@ -243,6 +280,25 @@ function Landing() {
             <Activity size={18} className="icon-pulse" />
             <span>{isHindi ? 'लाइव सिम्युलेटर आज़माएं' : 'Try Live Simulator'}</span>
           </a>
+        </div>
+
+        {/* Medical & AI Limitations Disclaimer Notice */}
+        <div className="medical-disclaimer-banner" role="alert">
+          <div className="disclaimer-badge">
+            <AlertTriangle size={18} className="disclaimer-icon" />
+            <span className="disclaimer-tag">{isHindi ? 'महत्वपूर्ण अस्वीकरण' : 'Important Medical Disclaimer'}</span>
+          </div>
+          <p className="disclaimer-text">
+            {isHindi ? (
+              <>
+                <strong>कृपया ध्यान दें:</strong> यह AI सिस्टम <strong>100% सटीक नहीं है</strong> और इसमें त्रुटियां हो सकती हैं। कृपया इस पर पूरी तरह निर्भर न रहें। किसी भी उपचार, दवा या निदान के लिए <strong>हमेशा योग्य डॉक्टर या प्रमाणित चिकित्सा विशेषज्ञ की सलाह अवश्य लें।</strong>
+              </>
+            ) : (
+              <>
+                <strong>Please Note:</strong> This AI-driven system is <strong>not 100% correct</strong> and can make mistakes. Please <strong>do not rely completely</strong> on these recommendations. Always consult a qualified doctor or certified healthcare professional for medical advice, definitive diagnosis, and treatment plans.
+              </>
+            )}
+          </p>
         </div>
 
         {/* Live Floating Clinical Holographic Stats */}
@@ -600,8 +656,8 @@ function Landing() {
             </div>
             <p className="footer-disclaimer">
               {isHindi 
-                ? 'CureAI डेटा साइंस द्वारा संचालित एक शैक्षणिक और क्लीनिकल निर्णय-सहायक टूल है। आपातकालीन स्थिति और निश्चित निदान के लिए हमेशा प्रमाणित चिकित्सक से परामर्श लें।'
-                : 'CureAI is an educational and clinical decision-support tool powered by data science. Always consult a certified medical practitioner for definitive medical diagnosis and emergency treatment.'}
+                ? '⚠️ चिकित्सा अस्वीकरण: CureAI एक AI/डेटा साइंस सहायक टूल है और 100% सटीक नहीं है। यह गलतियां कर सकता है। कृपया इस पर पूरी तरह निर्भर न रहें। किसी भी बीमारी के निश्चित निदान या आपातकालीन उपचार के लिए हमेशा एक पंजीकृत डॉक्टर से परामर्श लें।'
+                : '⚠️ Medical Disclaimer: CureAI is an AI-assisted decision support system and is not 100% accurate. AI predictions can contain errors and should never replace a professional doctor’s evaluation. Always consult a certified physician for medical treatment.'}
             </p>
           </div>
 
@@ -629,6 +685,13 @@ function Landing() {
           </div>
         </div>
       </footer>
+
+      {/* Add to Home Screen / Install Modal */}
+      <InstallAppModal 
+        isOpen={showInstallModal} 
+        onClose={() => setShowInstallModal(false)} 
+        isHindi={isHindi} 
+      />
     </div>
   );
 }

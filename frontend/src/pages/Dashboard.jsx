@@ -34,8 +34,10 @@ import {
   Dna,
   Zap,
   ArrowRight,
-  LogOut
+  LogOut,
+  Download
 } from 'lucide-react';
+import InstallAppModal from '../components/InstallAppModal';
 import './Dashboard.css';
 
 function Dashboard() {
@@ -53,7 +55,30 @@ function Dashboard() {
 
   const [step, setStep] = useState('symptoms'); // 'symptoms' | 'questions' | 'diagnosis' | 'prescription'
   const [loading, setLoading] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    const handlePrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handlePrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handlePrompt);
+  }, []);
+
+  const handleGetAppClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+        return;
+      }
+    }
+    setShowInstallModal(true);
+  };
   const [error, setError] = useState('');
   const [symptomText, setSymptomText] = useState('');
   const [symptomSearch, setSymptomSearch] = useState('');
@@ -690,6 +715,15 @@ function Dashboard() {
           </div>
 
           <div className="dash-header-actions">
+            <button 
+              onClick={handleGetAppClick} 
+              className="dash-nav-download"
+              title={language === 'hi' ? 'ऐप इंस्टॉल करें / शॉर्टकट' : 'Install App / Home Screen Shortcut'}
+            >
+              <Download size={15} />
+              <span>{language === 'hi' ? 'ऐप डाउनलोड' : 'Get App'}</span>
+            </button>
+
             <div className="dash-lang-capsule">
               <button 
                 className={`dash-lang-btn ${language === 'en' ? 'active' : ''}`} 
@@ -1288,6 +1322,13 @@ function Dashboard() {
           )}
         </section>
       </main>
+
+      {/* Add to Home Screen / Install Modal */}
+      <InstallAppModal 
+        isOpen={showInstallModal} 
+        onClose={() => setShowInstallModal(false)} 
+        isHindi={language === 'hi'} 
+      />
     </div>
   );
 }
